@@ -25,10 +25,10 @@ rng = np.random.default_rng(SEED)
 
 # ── Período de simulación ─────────────────────────────────────────────────────
 START = datetime(2024, 1, 1, 0, 0, 0)
-END   = datetime(2024, 12, 31, 23, 59, 0)
+END   = datetime(2026, 5, 22, 23, 59, 0)
 FREQ  = "1min"
 
-OUTPUT_DIR = "/mnt/user-data/outputs"
+OUTPUT_DIR = "/home/aitor/Documentos/ai-driven-industrial-iot-pipeline"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
