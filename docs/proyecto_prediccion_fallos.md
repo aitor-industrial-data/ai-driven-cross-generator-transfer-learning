@@ -1,521 +1,538 @@
-# Plan de Proyecto: Predicción de Fallos en Turbinas Eólicas
-## Kelmarsh SCADA — Guía paso a paso
-
-**Objetivo**: modelo que dado el estado actual de los sensores, prediga si un fallo ocurrirá en las próximas X horas.  
-**Filosofía**: simple primero, complejo después. El 80% del valor viene del 20% del trabajo.
+# Plan Definitivo — Predicción de Fallos Turbina Kelmarsh T1
+## Dataset: 2018–2021 · 210.388 filas · 10 min · 1 turbina
 
 ---
 
-## ARQUITECTURA FINAL (spoiler para entender las decisiones)
-
-```
-telemetry_filtered.parquet   ← 60 columnas × 9 años × 10 min
-       +
-fault_log.parquet            ← timestamp, turbine_id, fault_code
-       ↓
-  JOIN por fecha
-       ↓
-dataset_labeled.parquet      ← telemetría + ventanas rodantes + etiquetas
-       ↓
-  Un modelo por familia de fallos (5–7 modelos, no 40)
-```
-
----
-
-## FASE 0 — ENTORNO (1 tarde)
-
-### 0.1 Instala esto y solo esto
-
+### FASE 0 — ENTORNO (2 horas)
+ 
+**0.1 Instala exactamente esto:**
 ```bash
 pip install pandas pyarrow scikit-learn lightgbm matplotlib seaborn jupyter
 ```
-
-Usa Jupyter Notebook. No hace falta nada más.
-
-### 0.2 Estructura de carpetas
-
+ 
+**0.2 Estructura de carpetas:**
 ```
 proyecto_turbinas/
 ├── data/
-│   ├── raw/              ← csvs originales sin tocar NUNCA
-│   │   ├── bronze/       ← tus carpetas Kelmarsh_SCADA_YYYY_XXXX
-│   │   └── fault_log/    ← el CSV de fallos con is_failure_target
-│   ├── processed/        ← lo que vas generando
-│   └── models/           ← modelos guardados (.pkl)
+│   ├── raw/                      ← NUNCA tocar
+│   │   ├── bronze/               ← CSVs telemetría por año
+│   │   ├── silver/
+│   │   │   ├── fault_log.csv     ← tu archivo con is_failure_target
+│   │   │   └── technical_fault_catalog.csv
+│   ├── processed/                ← lo que vas generando
+│   └── models/                   ← modelos .pkl
 ├── notebooks/
-│   ├── 01_merge.ipynb
-│   ├── 02_features.ipynb
-│   ├── 03_labeling.ipynb
-│   ├── 04_train.ipynb
-│   └── 05_evaluate.ipynb
-└── src/
-    └── utils.py          ← funciones reutilizables
+│   ├── 01_eda_status_and_events.ipynb
+│   ├── 02_02_eda_telemetry_and_sensors.ipynb
+│   ├── 03_merge_y_limpieza.ipynb
+│   ├── 04_etiquetado.ipynb
+│   ├── 05_features.ipynb
+│   ├── 06_train_yaw.ipynb
+│   ├── 07_train_generador.ipynb
+│   ├── 08_train_freno.ipynb
+│   └── 09_train_pitch.ipynb
 ```
-
-**Regla de oro**: raw/ es sagrado. Nunca escribas en raw/.
-
+ 
 ---
-
-## FASE 1 — UNIR TELEMETRÍA + FALLOS (1 día)
-
-### 1.1 Carga y concatena todos los años de telemetría
-
+ 
+### FASE 1 — MERGE TELEMETRÍA + FALLOS (notebook 01)
+ 
+**Paso 1.1 — Carga y concatena todos los CSVs de telemetría**
 ```python
-# notebook 01_merge.ipynb
 import pandas as pd
 import glob
-
-# Carga todos los CSVs de telemetría
-files = glob.glob("data/raw/bronze/**/Kelmarsh*.csv", recursive=True)
-dfs = []
+ 
+# Lee todos los CSVs de la carpeta bronze
+files = sorted(glob.glob("data/raw/bronze/**/*.csv", recursive=True))
+print(f"Archivos encontrados: {len(files)}")
+ 
+chunks = []
 for f in files:
     df = pd.read_csv(f, parse_dates=["Date and time"], low_memory=False)
-    # Extrae turbina del nombre de carpeta
-    turbine_id = f.split("/")[-2]  # ajusta según tu ruta
-    df["turbine_id"] = turbine_id
-    dfs.append(df)
-
-telem = pd.concat(dfs, ignore_index=True)
-telem = telem.sort_values(["turbine_id", "Date and time"])
-telem = telem.set_index(["turbine_id", "Date and time"])
+    chunks.append(df)
+ 
+telem = pd.concat(chunks, ignore_index=True)
+telem = telem.sort_values("Date and time").reset_index(drop=True)
+telem = telem.rename(columns={"Date and time": "timestamp"})
+ 
+print(f"Filas totales: {len(telem):,}")
+print(f"Rango: {telem['timestamp'].min()} → {telem['timestamp'].max()}")
 ```
-
-### 1.2 Filtra las 60 columnas
-
+ 
+**Paso 1.2 — Renombra columnas a snake_case (las 303 columnas originales tienen espacios)**
+ 
+Las columnas del CSV original tienen nombres con paréntesis, espacios y caracteres
+especiales. Ya tienes el análisis de nulos con nombres en snake_case — el dataset
+procesado con Spark ya los renombró. Verifica cuál formato tienes:
+ 
 ```python
-COLS_60 = [
-    # VIENTO
-    "Wind speed (m/s)", "Wind speed, Standard deviation (m/s)",
-    "Wind speed Sensor 1 (m/s)", "Wind speed Sensor 1, Standard deviation (m/s)",
-    "Wind speed Sensor 1, Minimum (m/s)", "Wind speed Sensor 1, Maximum (m/s)",
-    "Wind speed Sensor 2 (m/s)", "Wind speed Sensor 2, Standard deviation (m/s)",
-    "Wind speed Sensor 2, Minimum (m/s)", "Wind speed Sensor 2, Maximum (m/s)",
-    "Wind direction (°)", "Wind direction, Standard deviation (°)",
-    "Nacelle position (°)", "Nacelle position, Standard deviation (°)",
-    "Vane position 1+2 (°)", "Vane position 1+2, StdDev (°)",
-    # POTENCIA
-    "Power (kW)", "Power, Standard deviation (kW)",
-    "Power factor (cosphi)", "Power factor (cosphi), Standard deviation",
-    "Reactive power (kvar)", "Grid voltage (V)", "Grid frequency (Hz)",
-    "Current L1 / U (A)", "Current L2 / V (A)", "Current L3 / W (A)",
-    # PITCH
-    "Blade angle (pitch position) A (°)", "Blade angle (pitch position) A, Max (°)",
-    "Blade angle (pitch position) A, Standard deviation (°)",
-    "Blade angle (pitch position) B (°)", "Blade angle (pitch position) B, Standard deviation (°)",
-    "Blade angle (pitch position) C (°)", "Blade angle (pitch position) C, Standard deviation (°)",
-    "Motor current axis 1 (A)", "Motor current axis 1, Max (A)", "Motor current axis 1, StdDev (A)",
-    "Motor current axis 2 (A)", "Motor current axis 2, Max (A)", "Motor current axis 2, StdDev (A)",
-    "Motor current axis 3 (A)", "Motor current axis 3, Max (A)", "Motor current axis 3, StdDev (A)",
-    "Temperature motor axis 1 (°C)", "Temperature motor axis 2 (°C)", "Temperature motor axis 3 (°C)",
-    # TREN
-    "Drive train acceleration (mm/ss)", "Tower Acceleration X (mm/ss)", "Tower Acceleration y (mm/ss)",
-    "Generator RPM (RPM)", "Generator RPM, Standard deviation (RPM)",
-    "Gear oil temperature (°C)", "Gear oil temperature, Max (°C)",
-    "Gear oil inlet temperature (°C)", "Gear oil inlet pressure (bar)",
-    "Gear oil inlet pressure, Min (bar)", "Gear oil pump pressure (bar)",
-    "Metal particle count", "Front bearing temperature (°C)", "Rear bearing temperature (°C)",
-    # GENERADOR Y CONVERTIDOR
-    "Generator bearing front temperature (°C)", "Generator bearing front temperature, Max (°C)",
-    "Generator bearing rear temperature (°C)", "Generator bearing rear temperature, Max (°C)",
-    "Ambient temperature (converter) (°C)", "Ambient temperature (converter), Max (°C)",
-    "Ambient temperature (converter), StdDev (°C)",
-    # NACELLE Y TRANSFORMADOR
-    "Nacelle temperature (°C)", "Nacelle temperature, Max (°C)",
-    "Nacelle temperature, Standard deviation (°C)",
-    "Nacelle ambient temperature (°C)",
-    "Transformer temperature (°C)",
-    # CABLE Y YAW
-    "Cable windings from calibration point",
+# Comprueba si las columnas ya están en snake_case o siguen el original
+print(telem.columns[:5].tolist())
+# Si ves "Date and time" → original con espacios
+# Si ves "Date_and_time" → ya procesado
+```
+ 
+Si siguen con espacios, renombra:
+```python
+telem.columns = (telem.columns
+    .str.replace(r'[^\w]', '_', regex=True)
+    .str.replace(r'_+', '_', regex=True)
+    .str.strip('_'))
+```
+ 
+**Paso 1.3 — Filtra las columnas que necesitas**
+ 
+```python
+# Columnas base para TODOS los modelos — <10% nulos, disponibles siempre
+COLS_BASE = [
+    "timestamp",
+    # Viento
+    "Wind_speed_ms", "Wind_speed_Standard_deviation_ms",
+    "Wind_speed_Sensor_1_ms", "Wind_speed_Sensor_2_ms",
+    "Wind_direction", "Wind_direction_Standard_deviation",
+    "Nacelle_position", "Nacelle_position_Standard_deviation",
+    "Vane_position_12",
+    # Potencia
+    "Power_kW", "Power_Standard_deviation_kW",
+    "Power_factor_cosphi", "Reactive_power_kvar",
+    "Grid_voltage_V", "Grid_frequency_Hz",
+    # Generador y tren
+    "Generator_RPM_RPM", "Generator_RPM_Standard_deviation_RPM",
+    "Rotor_speed_RPM",
+    "Drive_train_acceleration_mmss",
+    # Temperaturas — todas <5% nulos
+    "Generator_bearing_front_temperature_C", "Generator_bearing_rear_temperature_C",
+    "Generator_bearing_front_temperature_Max_C", "Generator_bearing_rear_temperature_Max_C",
+    "Nacelle_temperature_C", "Nacelle_temperature_Max_C",
+    "Nacelle_ambient_temperature_C",
+    "Ambient_temperature_converter_C",
+    "Front_bearing_temperature_C", "Rear_bearing_temperature_C",
+    "Gear_oil_temperature_C",
+    "Gear_oil_inlet_temperature_C",
+    "Stator_temperature_1_C",
+    "Temp_top_box_C",
+    # Hidráulico
+    "Gear_oil_inlet_pressure_bar", "Gear_oil_pump_pressure_bar",
+    # Cable y pitch
+    "Cable_windings_from_calibration_point",
+    "Blade_angle_pitch_position_A", "Blade_angle_pitch_position_B", "Blade_angle_pitch_position_C",
+    "Motor_current_axis_1_A", "Motor_current_axis_2_A", "Motor_current_axis_3_A",
+    "Temperature_motor_axis_1_C", "Temperature_motor_axis_2_C",
+    # Partículas metálicas — 0% nulos
+    "Metal_particle_count",
 ]
-
-telem = telem[[c for c in COLS_60 if c in telem.columns]]
+ 
+telem = telem[[c for c in COLS_BASE if c in telem.columns]].copy()
+print(f"Columnas seleccionadas: {telem.shape[1]}")
+print(f"Nulos por columna:\n{telem.isnull().mean().sort_values(ascending=False).head(10)}")
 ```
-
-### 1.3 Guarda en Parquet (10x más rápido que CSV)
-
+ 
+**Paso 1.4 — Guarda en Parquet**
 ```python
-telem.reset_index().to_parquet("data/processed/telemetry_filtered.parquet", index=False)
-# ~3.7 GB CSV → ~400 MB Parquet. Se lee en segundos.
+telem.to_parquet("data/processed/telemetry_clean.parquet", index=False)
+# De ~3.7 GB CSV → ~200 MB Parquet. Se carga en <5 segundos.
 ```
-
-### 1.4 Carga el log de fallos
-
+ 
+**Paso 1.5 — Carga y prepara el fault_log**
 ```python
-faults = pd.read_csv("data/raw/fault_log/fault_log.csv", parse_dates=["timestamp"])
-# Asegúrate de que tiene: timestamp, turbine_id, fault_code, is_failure_target
-faults = faults[faults["is_failure_target"] == True]
-faults = faults.sort_values(["turbine_id", "timestamp"])
-faults.to_parquet("data/processed/faults_filtered.parquet", index=False)
+faults = pd.read_csv("data/raw/silver/fault_log.csv",
+                     parse_dates=["Timestamp start"])
+ 
+# Redondear a la baja a 10 minutos (no round — floor)
+faults["timestamp"] = faults["Timestamp start"].dt.floor("10min")
+ 
+# Filtrar solo los que son failure target
+targets = faults[faults["is_failure_target"] == True].copy()
+targets = targets[["timestamp", "Code", "Message", "Status"]].copy()
+ 
+print(f"Eventos target totales: {len(targets)}")
+print(targets["Code"].value_counts().head(10))
+ 
+targets.to_parquet("data/processed/fault_targets.parquet", index=False)
 ```
-
+ 
+**VERIFICACIÓN CRÍTICA — hacer siempre:**
+```python
+# Comprueba que los timestamps encajan
+telem_times = set(telem["timestamp"].dt.floor("10min").unique())
+fault_times = set(targets["timestamp"].unique())
+overlap = fault_times.intersection(telem_times)
+print(f"Eventos target que tienen telemetría: {len(overlap)}/{len(fault_times)}")
+# Si es 0 → hay problema de timezone o formato de fecha. Investigar antes de continuar.
+```
+ 
 ---
-
-## FASE 2 — ETIQUETADO (el corazón del proyecto, 2 días)
-
-### Por qué NO hacer binario simple
-
-Un binario `is_failure = True/False` te dice "algo pasó" pero el modelo no aprende
-cuándo ni por qué. Peor: el 99.9% de las filas son False → el modelo aprende a decir
-siempre False y tiene 99.9% de accuracy. Es una trampa.
-
-### Lo que vas a crear en su lugar
-
-Dos columnas por cada FAMILIA de fallos (no por cada código):
-
-```
-hours_to_fault_FAMILIA   ← cuántas horas faltan para el próximo fallo (NaN si no hay fallo próximo)
-is_pre_fault_FAMILIA     ← True si hours_to_fault < lead_time de esa familia
-```
-
-### Las 6 familias de fallos (agrupa los 40 códigos en grupos)
-
+ 
+### FASE 2 — ETIQUETADO (notebook 02)
+ 
+**Por qué NO usar binario simple y qué usar en cambio:**
+ 
+El binario (0/1) tiene dos problemas: el 99% de las filas son 0 y el modelo aprende
+a decir siempre 0, y no puedes ajustar el umbral de alerta después sin reentrenar.
+ 
+Usamos `hours_to_fault`: cuántas horas faltan al próximo fallo de esa familia.
+- Si no hay fallo en las próximas N horas → NaN (estado normal)
+- Si hay fallo en las próximas N horas → el número de horas (ej: 47.3)
+- Luego `is_pre_fault = hours_to_fault <= lead_time` → esto sí es binario, pero calculado
+**Paso 2.1 — Define familias y lead times**
 ```python
 FAULT_FAMILIES = {
-    "pitch":        {"codes": [675, 681, 682, 683, 697, 716, 717, 718],   "lead_hours": 240},  # 10 días
-    "drivetrain":   {"codes": [59, 1070, 4500, 4510, 4520, 4530, 4540],    "lead_hours": 336},  # 14 días
-    "converter":    {"codes": [785, 3110, 3205, 3220],                      "lead_hours": 72},   # 3 días
-    "thermal":      {"codes": [1810, 2550, 2650, 2674, 3870],               "lead_hours": 120},  # 5 días
-    "yaw_cable":    {"codes": [3160, 6052, 6054, 6120],                     "lead_hours": 168},  # 7 días
-    "sensors":      {"codes": [6515, 6525, 6530, 6620, 6622, 6635],         "lead_hours": 72},   # 3 días
-    "hydraulic":    {"codes": [2000, 2125, 5510, 5720],                     "lead_hours": 72},   # 3 días
+    "yaw_cable":   {"codes": [6052, 6200, 6054, 6120, 6300],           "lead_hours": 168},
+    "brake_hydro": {"codes": [2125, 5720, 5510, 2000, 1860],           "lead_hours": 120},
+    "generator":   {"codes": [3000, 2550, 2650, 2655, 2674, 8400, 3125], "lead_hours": 120},
+    "pitch_bat":   {"codes": [716, 717, 718, 681, 682, 683, 675, 785, 850], "lead_hours": 336},
 }
 ```
-
-### Código de etiquetado
-
+ 
+**Paso 2.2 — Función de etiquetado**
 ```python
-# notebook 03_labeling.ipynb
-import pandas as pd
 import numpy as np
-
-telem = pd.read_parquet("data/processed/telemetry_filtered.parquet")
-faults = pd.read_parquet("data/processed/faults_filtered.parquet")
-
-telem["timestamp"] = pd.to_datetime(telem["Date and time"])
-telem = telem.sort_values(["turbine_id", "timestamp"])
-
-def label_family(telem_turb, faults_turb, lead_hours):
-    """Para una turbina y una familia, calcula hours_to_fault en cada fila."""
-    fault_times = faults_turb["timestamp"].sort_values().values
-    timestamps = telem_turb["timestamp"].values
+ 
+telem = pd.read_parquet("data/processed/telemetry_clean.parquet")
+targets = pd.read_parquet("data/processed/fault_targets.parquet")
+ 
+telem = telem.sort_values("timestamp").reset_index(drop=True)
+ 
+def label_family(telem_df, fault_times_sorted, lead_hours):
+    """
+    Para cada fila de telemetría, calcula horas al próximo fallo.
+    fault_times_sorted: array numpy de timestamps ordenados
+    """
+    ts_array = telem_df["timestamp"].values.astype("datetime64[ns]")
+    fault_array = np.array(fault_times_sorted, dtype="datetime64[ns]")
+    lead_ns = np.timedelta64(int(lead_hours * 3600e9), "ns")
     
-    hours_to_fault = np.full(len(timestamps), np.nan)
+    hours_arr = np.full(len(ts_array), np.nan)
     
-    for i, ts in enumerate(timestamps):
-        # Próximo fallo después de este timestamp
-        future = fault_times[fault_times > ts]
-        if len(future) == 0:
+    for i, ts in enumerate(ts_array):
+        # Busca el primer fallo después de este timestamp
+        future_mask = fault_array > ts
+        if not future_mask.any():
             continue
-        next_fault = future[0]
-        delta_hours = (next_fault - ts) / np.timedelta64(1, 'h')
-        if delta_hours <= lead_hours:
-            hours_to_fault[i] = delta_hours
+        next_fault = fault_array[future_mask][0]
+        delta_h = (next_fault - ts) / np.timedelta64(1, "h")
+        if delta_h <= lead_hours:
+            hours_arr[i] = delta_h
     
-    return hours_to_fault
-
-# Aplica para cada turbina y cada familia
-results = []
-for turbine in telem["turbine_id"].unique():
-    t = telem[telem["turbine_id"] == turbine].copy()
-    f = faults[faults["turbine_id"] == turbine].copy()
+    return hours_arr
+ 
+# Aplica para cada familia
+for family, cfg in FAULT_FAMILIES.items():
+    print(f"Etiquetando familia: {family}...")
     
-    for family, cfg in FAULT_FAMILIES.items():
-        f_family = f[f["fault_code"].isin(cfg["codes"])]
-        hours = label_family(t, f_family, cfg["lead_hours"])
-        t[f"hours_to_{family}"] = hours
-        t[f"is_pre_{family}"] = hours <= cfg["lead_hours"]
+    fault_times = (targets[targets["Code"].isin(cfg["codes"])]
+                   ["timestamp"]
+                   .sort_values()
+                   .values)
     
-    results.append(t)
-
-labeled = pd.concat(results, ignore_index=True)
-labeled.to_parquet("data/processed/dataset_labeled.parquet", index=False)
-print(f"Filas totales: {len(labeled):,}")
-print(labeled[[c for c in labeled.columns if "is_pre_" in c]].sum())
+    hours = label_family(telem, fault_times, cfg["lead_hours"])
+    telem[f"hours_to_{family}"] = hours
+    telem[f"is_pre_{family}"] = (hours <= cfg["lead_hours"]) & (~np.isnan(hours))
+    
+    n_true = telem[f"is_pre_{family}"].sum()
+    n_total = len(telem)
+    print(f"  → {n_true:,} filas pre-fallo ({100*n_true/n_total:.2f}% del total)")
+ 
+telem.to_parquet("data/processed/dataset_labeled.parquet", index=False)
+print("Guardado.")
 ```
-
----
-
-## FASE 3 — FEATURES DE VENTANA RODANTE (1–2 días)
-
-### Tu idea era buena, solo hay que hacerla por familia
-
-No necesitas las 12 columnas para los 60 sensores para todos los modelos.
-Cada familia usa un subconjunto de sensores. Esto reduce el problema de ~720 features
-a ~60–80 por modelo.
-
-```python
-# Define qué sensores importan para cada familia
-FAMILY_SENSORS = {
-    "pitch": [
-        "Blade angle (pitch position) A (°)", "Blade angle (pitch position) A, Standard deviation (°)",
-        "Blade angle (pitch position) B (°)", "Blade angle (pitch position) B, Standard deviation (°)",
-        "Blade angle (pitch position) C (°)", "Blade angle (pitch position) C, Standard deviation (°)",
-        "Motor current axis 1 (A)", "Motor current axis 1, Max (A)",
-        "Motor current axis 2 (A)", "Motor current axis 2, Max (A)",
-        "Motor current axis 3 (A)", "Motor current axis 3, Max (A)",
-        "Temperature motor axis 1 (°C)", "Temperature motor axis 2 (°C)", "Temperature motor axis 3 (°C)",
-        "Power (kW)", "Wind speed (m/s)",
-    ],
-    "drivetrain": [
-        "Drive train acceleration (mm/ss)", "Tower Acceleration X (mm/ss)", "Tower Acceleration y (mm/ss)",
-        "Gear oil temperature (°C)", "Gear oil temperature, Max (°C)",
-        "Gear oil inlet temperature (°C)", "Gear oil inlet pressure (bar)",
-        "Metal particle count", "Front bearing temperature (°C)", "Rear bearing temperature (°C)",
-        "Generator RPM (RPM)", "Generator RPM, Standard deviation (RPM)",
-        "Power (kW)", "Wind speed (m/s)",
-    ],
-    "converter": [
-        "Ambient temperature (converter) (°C)", "Ambient temperature (converter), Max (°C)",
-        "Ambient temperature (converter), StdDev (°C)",
-        "Power factor (cosphi)", "Power factor (cosphi), Standard deviation",
-        "Reactive power (kvar)", "Current L1 / U (A)", "Current L2 / V (A)", "Current L3 / W (A)",
-        "Power (kW)", "Wind speed (m/s)",
-    ],
-    "thermal": [
-        "Generator bearing front temperature (°C)", "Generator bearing front temperature, Max (°C)",
-        "Generator bearing rear temperature (°C)", "Generator bearing rear temperature, Max (°C)",
-        "Nacelle temperature (°C)", "Nacelle temperature, Max (°C)",
-        "Nacelle ambient temperature (°C)", "Transformer temperature (°C)",
-        "Gear oil temperature (°C)", "Gear oil inlet temperature (°C)",
-        "Power (kW)", "Wind speed (m/s)",
-    ],
-    "yaw_cable": [
-        "Nacelle position (°)", "Nacelle position, Standard deviation (°)",
-        "Wind direction (°)", "Wind direction, Standard deviation (°)",
-        "Vane position 1+2 (°)", "Vane position 1+2, StdDev (°)",
-        "Cable windings from calibration point",
-        "Power (kW)", "Wind speed (m/s)",
-    ],
-    "sensors": [
-        "Wind speed Sensor 1 (m/s)", "Wind speed Sensor 1, Standard deviation (m/s)",
-        "Wind speed Sensor 1, Minimum (m/s)", "Wind speed Sensor 1, Maximum (m/s)",
-        "Wind speed Sensor 2 (m/s)", "Wind speed Sensor 2, Standard deviation (m/s)",
-        "Vane position 1+2 (°)", "Vane position 1+2, StdDev (°)",
-        "Vane position 1+2, Max (°)", "Vane position 1+2, Min (°)",
-        "Wind direction (°)", "Wind direction, Standard deviation (°)",
-        "Power (kW)", "Wind speed (m/s)",
-    ],
-    "hydraulic": [
-        "Gear oil inlet pressure (bar)", "Gear oil inlet pressure, Min (bar)",
-        "Gear oil pump pressure (bar)", "Gear oil inlet temperature (°C)",
-        "Generator RPM (RPM)", "Generator RPM, Standard deviation (RPM)",
-        "Power (kW)",
-    ],
-}
-
-# Ventanas en número de pasos de 10 min
-WINDOWS = {
-    "1h":   6,
-    "5h":   30,
-    "24h":  144,
-    "7d":   1008,
-}
-
-def rolling_features(df, sensors, windows):
-    """Genera media, std y pendiente para cada sensor en cada ventana."""
-    new_cols = {}
-    for sensor in sensors:
-        if sensor not in df.columns:
-            continue
-        s = df[sensor]
-        for name, w in windows.items():
-            new_cols[f"{sensor}__mean_{name}"]  = s.rolling(w, min_periods=w//2).mean()
-            new_cols[f"{sensor}__std_{name}"]   = s.rolling(w, min_periods=w//2).std()
-            # Pendiente: regresión lineal simplificada = (último - primero) / ventana
-            new_cols[f"{sensor}__slope_{name}"] = (
-                s.rolling(w, min_periods=w//2).apply(
-                    lambda x: (x.iloc[-1] - x.iloc[0]) / len(x) if len(x) > 1 else np.nan,
-                    raw=False
-                )
-            )
-    return pd.DataFrame(new_cols, index=df.index)
-
-# Genera features por familia (hazlo turbina a turbina para no quedarte sin RAM)
-labeled = pd.read_parquet("data/processed/dataset_labeled.parquet")
-labeled = labeled.sort_values(["turbine_id", "timestamp"])
-
-for family, sensors in FAMILY_SENSORS.items():
-    print(f"Generando features para familia: {family}")
-    feat_list = []
-    for turbine in labeled["turbine_id"].unique():
-        t = labeled[labeled["turbine_id"] == turbine]
-        feat = rolling_features(t, sensors, WINDOWS)
-        feat_list.append(feat)
-    all_feats = pd.concat(feat_list)
-    # Guarda por familia (no junto todo, o te quedas sin RAM)
-    all_feats.to_parquet(f"data/processed/features_{family}.parquet")
-    print(f"  → {all_feats.shape[1]} features generadas")
-```
-
-### Cuántas features por modelo resultantes
-
-| Familia | Sensores base | × 4 ventanas × 3 stats | Total features |
-|---|---|---|---|
-| pitch | 17 | × 12 | ~204 |
-| drivetrain | 14 | × 12 | ~168 |
-| converter | 11 | × 12 | ~132 |
-| thermal | 12 | × 12 | ~144 |
-| yaw_cable | 9 | × 12 | ~108 |
-| sensors | 14 | × 12 | ~168 |
-| hydraulic | 7 | × 12 | ~84 |
-
-Manejable. LightGBM lo entrena en minutos en un portátil.
-
----
-
-## FASE 4 — ENTRENAMIENTO (1 día)
-
-### 4.1 El target correcto
-
-Usa `is_pre_FAMILIA` como target binario **pero con pesos de clase**,
-no con undersampling. Esto resuelve el desequilibrio sin tirar datos.
-
-```python
-from sklearn.utils.class_weight import compute_class_weight
-
-y = df["is_pre_pitch"]
-weights = compute_class_weight("balanced", classes=[False, True], y=y)
-# Resultado típico: True pesa ~50x más que False. LightGBM lo maneja bien.
-```
-
-### 4.2 Split temporal (NUNCA random)
-
-```python
-# Corte temporal: 80% para train, 20% para test
-# Siempre el futuro en test, nunca mezcles fechas
-cutoff = df["timestamp"].quantile(0.8)
-train = df[df["timestamp"] < cutoff]
-test  = df[df["timestamp"] >= cutoff]
-```
-
-### 4.3 Entrena con LightGBM
-
-```python
-import lightgbm as lgb
-from sklearn.metrics import classification_report
-
-family = "drivetrain"  # el más interesante para empezar
-
-# Carga datos de esa familia
-base = labeled[["turbine_id", "timestamp", f"is_pre_{family}"]].copy()
-feats = pd.read_parquet(f"data/processed/features_{family}.parquet")
-df = base.join(feats).dropna(subset=[f"is_pre_{family}"])
-
-cutoff = df["timestamp"].quantile(0.8)
-X_train = df[df["timestamp"] < cutoff][feats.columns]
-y_train = df[df["timestamp"] < cutoff][f"is_pre_{family}"]
-X_test  = df[df["timestamp"] >= cutoff][feats.columns]
-y_test  = df[df["timestamp"] >= cutoff][f"is_pre_{family}"]
-
-model = lgb.LGBMClassifier(
-    n_estimators=500,
-    class_weight="balanced",
-    learning_rate=0.05,
-    num_leaves=63,
-    random_state=42,
-    n_jobs=-1,
-)
-model.fit(X_train, y_train, eval_set=[(X_test, y_test)])
-
-print(classification_report(y_test, model.predict(X_test)))
-import pickle
-pickle.dump(model, open(f"data/models/model_{family}.pkl", "wb"))
-```
-
-### 4.4 Métrica correcta para este problema
-
-**No uses accuracy.** Usa:
-- **Recall** (de los fallos reales, ¿cuántos detectaste?) → quieres >80%
-- **Precision** (de las alertas que lanzaste, ¿cuántas eran reales?) → quieres >60%
-- **F1** como balance
-
-Un Recall de 85% con Precision de 65% es un modelo excelente para este dominio.
-
----
-
-## FASE 5 — EVALUAR E INTERPRETAR (1 día)
-
-### 5.1 Feature importance (qué sensores importan de verdad)
-
+ 
+**Paso 2.3 — Verifica el etiquetado visualmente para 1 familia**
 ```python
 import matplotlib.pyplot as plt
-
-feat_imp = pd.Series(model.feature_importances_, index=feats.columns)
-feat_imp.nlargest(20).plot(kind="barh", figsize=(10, 8))
-plt.title("Top 20 features — Drivetrain family")
+ 
+# Comprueba visualmente que el etiquetado tiene sentido
+df = pd.read_parquet("data/processed/dataset_labeled.parquet")
+ 
+# Muestra un fallo concreto y sus horas previas
+family = "yaw_cable"
+pre = df[df[f"is_pre_{family}"] == True]
+print(f"Primeras filas etiquetadas como pre-{family}:")
+print(pre[["timestamp", f"hours_to_{family}", "Nacelle_position",
+           "Cable_windings_from_calibration_point"]].head(20))
+ 
+# Pinta Cable_windings en los 7 días antes de un fallo
+fault_sample = targets[targets["Code"] == 6200]["timestamp"].iloc[0]
+window = df[(df["timestamp"] >= fault_sample - pd.Timedelta(days=10)) &
+            (df["timestamp"] <= fault_sample + pd.Timedelta(hours=1))]
+ 
+plt.figure(figsize=(14, 4))
+plt.plot(window["timestamp"], window["Cable_windings_from_calibration_point"])
+plt.axvline(fault_sample, color="red", label="Fallo 6200")
+plt.title("Cable windings antes de un Cable autounwind")
+plt.legend()
 plt.tight_layout()
-plt.savefig("data/models/feature_importance_drivetrain.png")
+plt.savefig("data/processed/check_etiquetado_cable.png")
+plt.show()
 ```
-
-Esto te dirá si el modelo usa las señales que tiene sentido físico que use.
-Si los top features son `Metal particle count` y `Gear oil temperature` → el modelo es fiable.
-Si el top feature es `Grid frequency` → algo está mal en el etiquetado.
-
-### 5.2 Curva de alertas en el tiempo
-
+ 
+---
+ 
+### FASE 3 — FEATURES DE VENTANA RODANTE (notebook 03)
+ 
+**Paso 3.1 — Función de rolling features**
+ 
 ```python
-# Para una turbina de test, pinta la probabilidad predicha vs el fallo real
-turb_test = df[(df["turbine_id"] == "Kelmarsh_SCADA_2022_4457") & 
-               (df["timestamp"] >= cutoff)]
-proba = model.predict_proba(turb_test[feats.columns])[:, 1]
-
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 6), sharex=True)
-ax1.plot(turb_test["timestamp"], proba, label="Probabilidad de fallo")
-ax1.axhline(0.5, color="red", linestyle="--", label="Umbral 50%")
-ax1.set_ylabel("P(fallo próximo)")
-ax1.legend()
-
-fault_times = faults[(faults["turbine_id"] == "Kelmarsh_SCADA_2022_4457") & 
-                      (faults["fault_code"].isin(FAULT_FAMILIES["drivetrain"]["codes"]))]
-for ft in fault_times["timestamp"]:
-    ax1.axvline(ft, color="red", alpha=0.5)
-
-plt.tight_layout()
-plt.savefig("data/models/alert_timeline.png")
+import pandas as pd
+import numpy as np
+ 
+df = pd.read_parquet("data/processed/dataset_labeled.parquet")
+df = df.sort_values("timestamp").reset_index(drop=True)
+ 
+# Ventanas en número de pasos de 10 min
+WINDOWS = {"1h": 6, "6h": 36, "24h": 144, "7d": 1008}
+ 
+def make_rolling_features(df, sensors, windows):
+    """
+    Genera media, std y pendiente para cada sensor en cada ventana.
+    IMPORTANTE: rolling() en pandas mira hacia atrás por defecto — correcto.
+    """
+    feats = {}
+    for col in sensors:
+        if col not in df.columns:
+            print(f"  WARN: {col} no encontrada, saltando")
+            continue
+        s = df[col]
+        for wname, w in windows.items():
+            roll = s.rolling(w, min_periods=max(1, w//3))
+            feats[f"{col}__mean_{wname}"]  = roll.mean()
+            feats[f"{col}__std_{wname}"]   = roll.std()
+            # Pendiente simplificada: (último - primero) / n_pasos
+            feats[f"{col}__slope_{wname}"] = roll.apply(
+                lambda x: (x.iloc[-1] - x.iloc[0]) / len(x) if len(x) > 1 else 0.0,
+                raw=False
+            )
+    return pd.DataFrame(feats, index=df.index)
 ```
-
-Esto es lo que le enseñas a un operador de planta. Si la curva sube 2 semanas antes
-del palo rojo, el modelo funciona.
-
+ 
+**Paso 3.2 — Define sensores por familia y genera features**
+ 
+```python
+FAMILY_SENSORS = {
+    "yaw_cable": [
+        "Nacelle_position", "Nacelle_position_Standard_deviation",
+        "Wind_direction", "Wind_direction_Standard_deviation",
+        "Vane_position_12", "Cable_windings_from_calibration_point",
+        "Wind_speed_ms", "Power_kW",
+    ],
+    "brake_hydro": [
+        "Gear_oil_inlet_pressure_bar", "Gear_oil_pump_pressure_bar",
+        "Gear_oil_inlet_temperature_C", "Gear_oil_temperature_C",
+        "Generator_RPM_RPM", "Generator_RPM_Standard_deviation_RPM",
+        "Rotor_speed_RPM", "Power_kW",
+        "Front_bearing_temperature_C", "Rear_bearing_temperature_C",
+        "Metal_particle_count",
+    ],
+    "generator": [
+        "Generator_bearing_front_temperature_C", "Generator_bearing_rear_temperature_C",
+        "Generator_bearing_front_temperature_Max_C", "Generator_bearing_rear_temperature_Max_C",
+        "Nacelle_temperature_C", "Nacelle_ambient_temperature_C",
+        "Ambient_temperature_converter_C",
+        "Power_kW", "Reactive_power_kvar", "Power_factor_cosphi",
+        "Stator_temperature_1_C", "Wind_speed_ms",
+    ],
+    "pitch_bat": [
+        "Motor_current_axis_1_A", "Motor_current_axis_2_A", "Motor_current_axis_3_A",
+        "Blade_angle_pitch_position_A", "Blade_angle_pitch_position_B", "Blade_angle_pitch_position_C",
+        "Temperature_motor_axis_1_C", "Temperature_motor_axis_2_C",
+        "Nacelle_ambient_temperature_C", "Power_kW", "Wind_speed_ms",
+    ],
+    "tower": [
+            "Drive_train_acceleration_mmss",
+        "Generator_RPM_RPM", "Rotor_speed_RPM",
+        "Wind_speed_ms", "Wind_speed_Standard_deviation_ms",
+    ],
+}
+ 
+# AÑADE features calculadas (no están en el CSV, las construyes tú)
+df["yaw_error"] = (df["Nacelle_position"] - df["Wind_direction"]).abs() % 360
+df["yaw_error"] = df["yaw_error"].apply(lambda x: x if x <= 180 else 360 - x)
+df["T_bearing_delta"] = df["Generator_bearing_front_temperature_C"] - df["Nacelle_ambient_temperature_C"]
+df["pitch_asymmetry"] = (df[["Blade_angle_pitch_position_A",
+                              "Blade_angle_pitch_position_B",
+                              "Blade_angle_pitch_position_C"]].max(axis=1) -
+                          df[["Blade_angle_pitch_position_A",
+                              "Blade_angle_pitch_position_B",
+                              "Blade_angle_pitch_position_C"]].min(axis=1))
+ 
+# Añade las calculadas a los sensores de cada familia
+FAMILY_SENSORS["yaw_cable"].append("yaw_error")
+FAMILY_SENSORS["generator"].append("T_bearing_delta")
+FAMILY_SENSORS["pitch_bat"].append("pitch_asymmetry")
+ 
+# Genera y guarda features por familia
+for family, sensors in FAMILY_SENSORS.items():
+    print(f"\nGenerando features para: {family}")
+    feats = make_rolling_features(df, sensors, WINDOWS)
+    
+    # Añade las columnas target de esta familia
+    target_cols = [f"hours_to_{family}", f"is_pre_{family}"]
+    output = pd.concat([df[["timestamp"] + target_cols], feats], axis=1)
+    
+    path = f"data/processed/features_{family}.parquet"
+    output.to_parquet(path, index=False)
+    print(f"  → {feats.shape[1]} features | guardado en {path}")
+    print(f"  → Filas pre-fallo: {output[f'is_pre_{family}'].sum():,}")
+```
+ 
 ---
-
-## RESUMEN DE TIEMPOS Y DIFICULTAD
-
-| Fase | Tiempo estimado | Dificultad | Puede fallar si... |
-|---|---|---|---|
-| 0 — Entorno | 2 horas | Baja | Versión Python incompatible |
-| 1 — Merge | 1 día | Media | turbine_id no coincide entre archivos |
-| 2 — Etiquetado | 2 días | Alta | Timestamps desalineados entre telemetría y fallos |
-| 3 — Features | 1–2 días | Media | RAM insuficiente (hazlo turbina a turbina) |
-| 4 — Entrenamiento | 1 día | Baja | Target muy desbalanceado (usa class_weight) |
-| 5 — Evaluación | 1 día | Media | Confundir accuracy con recall |
-
-**Total: ~1–2 semanas a tiempo parcial desde casa.**
-
+ 
+### FASE 4 — ENTRENAMIENTO (un notebook por familia)
+ 
+**Paso 4.1 — Carga datos y hace split temporal**
+ 
+```python
+import lightgbm as lgb
+from sklearn.metrics import classification_report, confusion_matrix
+import pickle
+ 
+family = "yaw_cable"   # cambia esto por cada familia
+ 
+df = pd.read_parquet(f"data/processed/features_{family}.parquet")
+df = df.dropna(subset=[f"is_pre_{family}"])
+ 
+# Features: todas las columnas que no sean timestamp ni target
+feature_cols = [c for c in df.columns
+                if c not in ["timestamp", f"hours_to_{family}", f"is_pre_{family}"]]
+ 
+# Split temporal — NUNCA aleatorio
+# Usa el 80% más antiguo para train, el 20% más reciente para test
+cutoff = df["timestamp"].quantile(0.80)
+print(f"Corte temporal: {cutoff}")
+print(f"  Train: hasta {cutoff}")
+print(f"  Test:  desde {cutoff}")
+ 
+train = df[df["timestamp"] < cutoff]
+test  = df[df["timestamp"] >= cutoff]
+ 
+X_train = train[feature_cols]
+y_train = train[f"is_pre_{family}"]
+X_test  = test[feature_cols]
+y_test  = test[f"is_pre_{family}"]
+ 
+print(f"\nTrain: {len(train):,} filas | {y_train.sum():,} positivos ({100*y_train.mean():.2f}%)")
+print(f"Test:  {len(test):,} filas  | {y_test.sum():,} positivos ({100*y_test.mean():.2f}%)")
+```
+ 
+**Paso 4.2 — Entrena LightGBM con class_weight**
+ 
+```python
+model = lgb.LGBMClassifier(
+    n_estimators=500,
+    class_weight="balanced",     # resuelve el desequilibrio sin tirar datos
+    learning_rate=0.05,
+    num_leaves=31,               # empieza conservador, sube si underfitting
+    min_child_samples=20,        # evita overfitting con pocos positivos
+    subsample=0.8,
+    colsample_bytree=0.8,
+    random_state=42,
+    n_jobs=-1,
+    verbose=-1,
+)
+ 
+model.fit(
+    X_train, y_train,
+    eval_set=[(X_test, y_test)],
+    callbacks=[lgb.early_stopping(50, verbose=True), lgb.log_evaluation(50)],
+)
+ 
+# Guarda el modelo
+pickle.dump(model, open(f"data/models/model_{family}.pkl", "wb"))
+print(f"Modelo guardado: data/models/model_{family}.pkl")
+```
+ 
+**Paso 4.3 — Evalúa con las métricas correctas**
+ 
+```python
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:, 1]
+ 
+print("\n" + "="*50)
+print(f"RESULTADOS — {family}")
+print("="*50)
+print(classification_report(y_test, y_pred, target_names=["Normal", "Pre-fallo"]))
+ 
+cm = confusion_matrix(y_test, y_pred)
+print(f"\nMatriz de confusión:")
+print(f"  Verdaderos negativos: {cm[0,0]:,}  (alarmas correctas de 'todo OK')")
+print(f"  Falsos positivos:     {cm[0,1]:,}  (falsas alarmas)")
+print(f"  Falsos negativos:     {cm[1,0]:,}  (fallos NO detectados) ← el peor error")
+print(f"  Verdaderos positivos: {cm[1,1]:,}  (fallos detectados correctamente)")
+ 
+# Métricas objetivo:
+# Recall > 0.80 (detectar >80% de los fallos reales)
+# Precision > 0.50 (>50% de las alarmas son reales — aceptable en industria)
+```
+ 
+**Paso 4.4 — Feature importance (validación de sentido físico)**
+ 
+```python
+import matplotlib.pyplot as plt
+ 
+feat_imp = pd.Series(model.feature_importances_, index=feature_cols)
+top20 = feat_imp.nlargest(20)
+ 
+fig, ax = plt.subplots(figsize=(10, 8))
+top20.sort_values().plot(kind="barh", ax=ax, color="#378ADD")
+ax.set_title(f"Top 20 features — {family}")
+ax.set_xlabel("Importancia (gain)")
+plt.tight_layout()
+plt.savefig(f"data/models/feature_importance_{family}.png", dpi=150)
+plt.show()
+ 
+# VERIFICA: ¿las features más importantes tienen sentido físico?
+# Yaw: deberían aparecer cable_windings, yaw_error, nacelle_std
+# Si aparece Power_kW como top 1 → sospechoso, revisar etiquetado
+```
+ 
+**Paso 4.5 — Visualiza alertas en el tiempo**
+ 
+```python
+# Para el período de test, pinta la probabilidad predicha vs los fallos reales
+test_with_prob = test.copy()
+test_with_prob["prob"] = y_prob
+ 
+fig, ax = plt.subplots(figsize=(16, 5))
+ax.fill_between(test_with_prob["timestamp"], test_with_prob["prob"],
+                alpha=0.4, color="#378ADD", label="P(fallo próximo)")
+ax.axhline(0.5, color="gray", linestyle="--", linewidth=0.8, label="Umbral 50%")
+ 
+# Marca los fallos reales
+fault_times_test = (targets[targets["Code"].isin(FAULT_FAMILIES[family]["codes"])]
+                    [targets["timestamp"] >= cutoff]["timestamp"])
+for ft in fault_times_test:
+    ax.axvline(ft, color="red", alpha=0.7, linewidth=1.5)
+ 
+ax.set_ylabel("Probabilidad de fallo")
+ax.set_title(f"Alertas predichas vs fallos reales — {family} (período de test)")
+ax.legend()
+plt.tight_layout()
+plt.savefig(f"data/models/timeline_{family}.png", dpi=150)
+plt.show()
+# Si la probabilidad sube ANTES de las líneas rojas → el modelo funciona
+```
+ 
 ---
-
-## RIESGOS Y CÓMO EVITARLOS
-
-### Riesgo 1: Te quedas sin RAM
-- Procesa siempre turbina a turbina
-- Usa Parquet, no CSV
-- Nunca cargues el dataset entero en memoria
-
-### Riesgo 2: El modelo siempre predice False
-- Verifica que `is_pre_FAMILIA.value_counts()` tenga >100 casos True
-- Usa `class_weight="balanced"` siempre
-- Si hay <50 fallos de un tipo, no entrenes ese modelo
-
-### Riesgo 3: El modelo hace "trampa" (data leakage)
-- NUNCA uses random split — siempre temporal
-- No incluyas columnas derivadas del target como feature
-- Las ventanas rodantes se calculan solo sobre el pasado (el `rolling()` por defecto es hacia atrás)
-
-### Riesgo 4: Timestamps desalineados
-- Verifica que ambos datasets usen UTC o ambos usen local
-- Redondea timestamps a 10 min antes del join: `df["timestamp"].dt.round("10min")`
-
-### Riesgo 5: El fallo que tiene 10 ocurrencias en 9 años
-- Empieza por drivetrain (1070) y pitch (675) — son los más frecuentes
-- Los fallos raros (2000, 3160) déjalos para después o ignóralos
-
+ 
+### RIESGOS Y CÓMO EVITARLOS
+ 
+| Riesgo | Síntoma | Solución |
+|--------|---------|---------|
+| RAM insuficiente | Python se cuelga en Fase 3 | Procesar en chunks de 6 meses |
+| Timestamps no encajan | overlap=0 en verificación Fase 1 | Comprobar timezone (UTC vs local) |
+| Modelo siempre predice False | Accuracy 99%, Recall 0% | Confirmar `class_weight="balanced"` |
+| Data leakage | Métricas perfectas en test | Verificar que el split sea temporal |
+| Features del futuro | Rolling std sube justo EN el fallo | `rolling()` por defecto es lookback — correcto |
+| Sensores con 53% nulos en rolling | NaN se propagan | NO incluir Max/StdDev con >40% nulos |
+| Familia sensores (solo dic 2021) | Overfitting a un evento | Empezar con reglas deterministas |
+ 
+### ORDEN FINAL RECOMENDADO
+ 
+```
+Semana 1: Fase 0 + Fase 1 (entorno + merge + parquet)
+Semana 2: Fase 2 (etiquetado + verificación visual)
+Semana 3: Fase 3 + 4 para YAW/CABLE (el más sencillo y más datos)
+Semana 4: Fase 4 para GENERADOR y FRENO
+Semana 5: Fase 4 para PITCH
+Semana 6: Evaluación cruzada + ajuste de umbrales
+```
