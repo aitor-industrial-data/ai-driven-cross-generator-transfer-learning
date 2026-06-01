@@ -17,25 +17,25 @@ proyecto_turbinas/
 │   ├── raw/                      ← NUNCA tocar
 │   │   ├── bronze/               ← CSVs telemetría por año
 │   │   ├── silver/
-│   │   │   ├── fault_log.csv     ← tu archivo con is_failure_target
+│   │   │   ├── fault_log.csv     ← archivo con is_failure_target
 │   │   │   └── technical_fault_catalog.csv
-│   ├── processed/                ← lo que vas generando
+│   ├── processed/                ← lo que va generando
 │   └── models/                   ← modelos .pkl
 ├── notebooks/
-│   ├── 01_eda_status_and_events.ipynb
-│   ├── 02_02_eda_telemetry_and_sensors.ipynb
-│   ├── 03_merge_y_limpieza.ipynb
-│   ├── 04_etiquetado.ipynb
-│   ├── 05_features.ipynb
-│   ├── 06_train_yaw.ipynb
-│   ├── 07_train_generador.ipynb
-│   ├── 08_train_freno.ipynb
-│   └── 09_train_pitch.ipynb
+│   ├── 01_eda_status_and_events.ipynb                # Estados operativos, status, eventos temporales
+│   ├── 02_02_eda_telemetry_and_sensors.ipynb         # Telemetría, sensores, análisis de nulos
+│   ├── 03_merge_and_cleaning.ipynb                   # Merge de fuentes + limpieza
+│   ├── 04_labeling.ipynb                             # Etiquetado de fallos/estados objetivo
+│   ├── 05_feature_engineering.ipynb                  # Ingeniería de características
+│   ├── 06_train_yaw.ipynb                            # Modelo: desalineación de yaw
+│   ├── 07_train_generator.ipynb                      # Modelo: fallos de generador
+│   ├── 08_train_brake.ipynb                          # Modelo: fallos de freno
+│   └── 09_train_pitch.ipynb                          # Modelo: fallos de pitch
 ```
  
 ---
  
-### FASE 1 — MERGE TELEMETRÍA + FALLOS (notebook 01)
+### FASE 1 — MERGE TELEMETRÍA + FALLOS (notebook 03)
  
 **Paso 1.1 — Carga y concatena todos los CSVs de telemetría**
 ```python
@@ -163,7 +163,7 @@ print(f"Eventos target que tienen telemetría: {len(overlap)}/{len(fault_times)}
  
 ---
  
-### FASE 2 — ETIQUETADO (notebook 02)
+### FASE 2 — ETIQUETADO (notebook 04)
  
 **Por qué NO usar binario simple y qué usar en cambio:**
  
