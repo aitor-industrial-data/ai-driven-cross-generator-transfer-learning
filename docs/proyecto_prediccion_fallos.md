@@ -268,7 +268,7 @@ plt.show()
  
 ---
  
-### FASE 3 — FEATURES DE VENTANA RODANTE (notebook 03)
+### FASE 3 — FEATURES DE VENTANA RODANTE (notebook 05)
  
 **Paso 3.1 — Función de rolling features**
  
