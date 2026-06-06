@@ -8,24 +8,14 @@ import sys
 import glob
 import re
 import logging
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
-# CONFIGURACIÓN DE LOGGING
+# CONFIGURACIÓN DE LOGGING (Solo por pantalla)
 # ---------------------------------------------------------------------------
-log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-os.makedirs(log_dir, exist_ok=True)
-
-log_file = os.path.join(
-    log_dir,
-    f"kelmarsh_clean_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-)
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(log_file, encoding="utf-8"),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -74,7 +64,7 @@ logger.info("📅 Años objetivo:      %s", ", ".join(TARGET_YEARS))
 # ---------------------------------------------------------------------------
 logger.info("")
 logger.info("-" * 70)
-logger.info("PASO 1/7: Inicializando Spark Session")
+logger.info("PASO 1/8: Inicializando Spark Session")
 logger.info("-" * 70)
 
 try:
@@ -138,7 +128,7 @@ def clean_header_line(line):
 # ---------------------------------------------------------------------------
 logger.info("")
 logger.info("-" * 70)
-logger.info("PASO 2/7: Buscando archivos CSV en bronze/")
+logger.info("PASO 2/8: Buscando archivos CSV en bronze/")
 logger.info("-" * 70)
 
 try:
@@ -171,7 +161,7 @@ except Exception as e:
 # ---------------------------------------------------------------------------
 logger.info("")
 logger.info("-" * 70)
-logger.info("PASO 3/7: Extrayendo y limpiando headers")
+logger.info("PASO 3/8: Extrayendo y limpiando headers")
 logger.info("-" * 70)
 
 files_info = []
@@ -213,7 +203,7 @@ except Exception as e:
 # ---------------------------------------------------------------------------
 logger.info("")
 logger.info("-" * 70)
-logger.info("PASO 4/7: Cargando archivos con Spark")
+logger.info("PASO 4/8: Cargando archivos con Spark")
 logger.info("-" * 70)
 
 spark_dfs = []
@@ -263,7 +253,7 @@ except Exception as e:
 # ---------------------------------------------------------------------------
 logger.info("")
 logger.info("-" * 70)
-logger.info("PASO 5/7: Uniendo todos los DataFrames")
+logger.info("PASO 5/8: Uniendo todos los DataFrames")
 logger.info("-" * 70)
 
 try:
@@ -290,7 +280,7 @@ except Exception as e:
 # ---------------------------------------------------------------------------
 logger.info("")
 logger.info("-" * 70)
-logger.info("PASO 6/7: Filtrando columnas base y calculando nulos")
+logger.info("PASO 6/8: Filtrando columnas base y calculando nulos")
 logger.info("-" * 70)
 
 # Columnas base para TODOS los modelos — <10% nulos, disponibles siempre
@@ -366,8 +356,7 @@ try:
         logger.info("   ℹ️  No hay columnas para calcular nulos (solo timestamp).")
 
     logger.info("")
-    logger.info("🎯 Total de registros finales: %d", total_filas)
-    logger.info("📊 NÚMERO TOTAL DE COLUMNAS FINALES: %d", len(turbine_data_df.columns))
+    logger.info("🎯 Total de registros procesados: %d", total_filas)
 
 except Exception as e:
     logger.error("❌ Error al filtrar columnas o calcular nulos: %s", e)
@@ -375,20 +364,51 @@ except Exception as e:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# 8. GUARDAR EN PARQUET (SILVER)
+# 8. DESPLAZAMIENTO DE FECHAS (SUMAR 8 AÑOS)
 # ---------------------------------------------------------------------------
 logger.info("")
 logger.info("-" * 70)
-logger.info("PASO 7/7: Guardando en formato Parquet (silver/)")
+logger.info("PASO 7/8: Desplazando marcas de tiempo (+8 años)")
+logger.info("-" * 70)
+
+try:
+    # Asegurar que timestamp sea tratado como TimestampType en PySpark
+    turbine_data_df = turbine_data_df.withColumn("timestamp", F.to_timestamp("timestamp"))
+    
+    # Obtener rangos antes del cambio para el log
+    rango_original = turbine_data_df.select(F.min("timestamp"), F.max("timestamp")).collect()[0]
+    logger.info("📅 Rango original del SCADA: %s  →  %s", rango_original[0], rango_original[1])
+
+    # Aplicar el incremento de 8 años usando expresiones SQL de Spark
+    turbine_data_df = turbine_data_df.withColumn("timestamp", F.col("timestamp") + F.expr("INTERVAL 8 YEARS"))
+    
+    # Obtener rangos modificados
+    rango_desplazado = turbine_data_df.select(F.min("timestamp"), F.max("timestamp")).collect()[0]
+    logger.info("🚀 Rango desplazado (+8 años): %s  →  %s", rango_desplazado[0], rango_desplazado[1])
+
+except Exception as e:
+    logger.error("❌ Error durante el desplazamiento de fechas: %s", e)
+    spark.stop()
+    sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# 9. GUARDAR EN PARQUET (SILVER)
+# ---------------------------------------------------------------------------
+logger.info("")
+logger.info("-" * 70)
+logger.info("PASO 8/8: Guardando en formato Parquet (silver/)")
 logger.info("-" * 70)
 
 try:
     output_path = os.path.join(SILVER_DIR, f"turbine_{NUMBER_TURBINE}_telemetry_clean.parquet")
+    
+    # PySpark sobreescribirá la estructura de carpetas de forma nativa sin que salte el IsADirectoryError
     turbine_data_df.write.parquet(output_path, mode="overwrite")
 
     rel_path = os.path.relpath(output_path, BASE_DIR)
     logger.info("✅ Archivo guardado exitosamente en: ./%s", rel_path)
     logger.info("   📦 Tamaño aproximado: verificar en disco")
+    logger.info("📊 NÚMERO TOTAL DE COLUMNAS FINALES: %d", len(turbine_data_df.columns))
 
 except Exception as e:
     logger.error("❌ Error al guardar Parquet: %s", e)
@@ -396,7 +416,7 @@ except Exception as e:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# 9. LIMPIEZA Y CIERRE
+# 10. LIMPIEZA Y CIERRE
 # ---------------------------------------------------------------------------
 logger.info("")
 logger.info("-" * 70)
@@ -424,5 +444,4 @@ except Exception as e:
 logger.info("")
 logger.info("=" * 70)
 logger.info("SCRIPT FINALIZADO CON ÉXITO")
-logger.info("Log guardado en: %s", log_file)
 logger.info("=" * 70)
