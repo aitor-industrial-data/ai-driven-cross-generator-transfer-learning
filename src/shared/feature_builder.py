@@ -111,7 +111,17 @@ def make_rolling_features(df: pd.DataFrame, sensors: list,
     return pd.DataFrame(feats, index=df.index)
 
 def add_temporal_context(df: pd.DataFrame, family: str, fault_times: list) -> pd.DataFrame:
-    """Añade hours_since_last_fault (y versión log)."""
+    """
+    Añade hours_since_last_fault y su versión log.
+    fault_times: fallos PASADOS conocidos (no futuros — sin data leakage).
+    En T2 sin histórico propio, se pasan los fallos de T1 como aproximación inicial.
+    """
+    if not fault_times:
+        # Sin fallos de referencia: asignar 1 año a todas las filas
+        import pandas as _pd
+        df[f"hours_since_last_{family}"]     = 8760.0
+        df[f"hours_since_last_{family}_log"] = float(np.log1p(8760.0))
+        return df
     fault_arr   = np.array(fault_times, dtype='datetime64[ns]')
     ts_arr      = df['timestamp'].values.astype('datetime64[ns]')
     hours_since = np.full(len(ts_arr), np.nan)
