@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mantenimiento Predictivo · Kelmarsh T1</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:        #0a0c10;
+  --bg2:       #0f1318;
+  --bg3:       #161b22;
+  --border:    #21262d;
+  --border2:   #30363d;
+  --text:      #e6edf3;
+  --text2:     #8b949e;
+  --text3:     #484f58;
+  --accent:    #58a6ff;
+  --green:     #3fb950;
+  --orange:    #d29922;
+  --red:       #f85149;
+  --yaw:       #378ADD;
+  --gen:       #D85A30;
+  --brake:     #BA7517;
+  --pitch:     #1D9E75;
+  --radius:    8px;
+  --radius-lg: 14px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Syne', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── NOISE OVERLAY ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none; z-index: 0; opacity: .4;
+}
+
+/* ── HEADER ── */
+header {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(10,12,16,.85);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem;
+  display: flex; align-items: center; justify-content: space-between;
+  height: 60px;
+}
+.logo {
+  display: flex; align-items: center; gap: .75rem;
+  font-size: .85rem; font-weight: 600; letter-spacing: .04em;
+  color: var(--text2);
+}
+.logo-icon {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, var(--accent), #1f6feb);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .9rem;
+}
+nav { display: flex; gap: .25rem; }
+nav a {
+  color: var(--text2); text-decoration: none;
+  font-size: .8rem; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: .4rem .8rem; border-radius: var(--radius);
+  transition: all .2s;
+}
+nav a:hover, nav a.active { background: var(--bg3); color: var(--text); }
+.status-badge {
+  display: flex; align-items: center; gap: .5rem;
+  font-size: .75rem; color: var(--text2);
+  font-family: 'JetBrains Mono', monospace;
+}
+.dot { width:7px; height:7px; border-radius:50%; background:var(--green);
+       box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* ── MAIN ── */
+main { max-width: 1400px; margin: 0 auto; padding: 2rem; position: relative; z-index: 1; }
+
+/* ── HERO ── */
+.hero {
+  padding: 3.5rem 0 2.5rem;
+  display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 2rem;
+}
+.hero-title {
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  font-weight: 800; line-height: 1.1;
+  letter-spacing: -.02em;
+}
+.hero-title span { color: var(--accent); }
+.hero-sub {
+  margin-top: .75rem;
+  color: var(--text2); font-size: .95rem; line-height: 1.6;
+  max-width: 580px; font-weight: 400;
+}
+.hero-meta {
+  text-align: right;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .72rem; color: var(--text3); line-height: 1.8;
+}
+
+/* ── SECTION HEADER ── */
+.section-header {
+  display: flex; align-items: baseline; gap: 1rem;
+  margin: 3rem 0 1.5rem;
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--border);
+}
+.section-title {
+  font-size: 1.1rem; font-weight: 700; letter-spacing: .02em;
+}
+.section-sub { color: var(--text3); font-size: .8rem; font-family: 'JetBrains Mono', monospace; }
+
+/* ── KPI CARDS ── */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px,1fr));
+  gap: 1rem; margin-bottom: 1.5rem;
+}
+.kpi-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem 1.5rem;
+  position: relative; overflow: hidden;
+  transition: border-color .2s, transform .2s;
+}
+.kpi-card:hover { border-color: var(--border2); transform: translateY(-2px); }
+.kpi-card::before {
+  content: ''; position: absolute;
+  inset: 0; border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--accent-card, transparent) 0%, transparent 60%);
+  opacity: .06; pointer-events: none;
+}
+.kpi-label {
+  font-size: .72rem; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text3); margin-bottom: .5rem;
+}
+.kpi-value {
+  font-size: 2rem; font-weight: 800; line-height: 1;
+  letter-spacing: -.02em; color: var(--text);
+}
+.kpi-value .unit { font-size: .9rem; color: var(--text2); font-weight: 400; margin-left: .25rem; }
+.kpi-desc { margin-top: .5rem; font-size: .75rem; color: var(--text2); }
+
+/* ── FAMILY TABS ── */
+.family-tabs {
+  display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.5rem;
+}
+.tab-btn {
+  background: var(--bg2); border: 1px solid var(--border);
+  color: var(--text2); font-family: 'Syne', sans-serif;
+  font-size: .8rem; font-weight: 600;
+  padding: .5rem 1rem; border-radius: var(--radius);
+  cursor: pointer; transition: all .2s;
+  display: flex; align-items: center; gap: .5rem;
+}
+.tab-btn:hover { border-color: var(--border2); color: var(--text); }
+.tab-btn.active { color: #fff; border-color: transparent; }
+.tab-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* ── MAIN PANEL ── */
+.panel {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); overflow: hidden;
+}
+.panel-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.panel-title { font-size: .85rem; font-weight: 600; }
+.panel-body { padding: 1.5rem; }
+
+/* ── CHART CONTAINER ── */
+.chart-wrap { position: relative; width: 100%; }
+
+/* ── METRICS ROW ── */
+.metrics-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px,1fr));
+  gap: .75rem; margin-bottom: 1.5rem;
+}
+.metric-chip {
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .75rem 1rem;
+}
+.metric-chip .lbl { font-size: .65rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text3); }
+.metric-chip .val { font-size: 1.3rem; font-weight: 700; margin-top: .2rem; }
+.metric-chip .val.good { color: var(--green); }
+.metric-chip .val.warn { color: var(--orange); }
+.metric-chip .val.bad  { color: var(--red); }
+
+/* ── EVENT TABLE ── */
+.event-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.event-table th {
+  text-align: left; padding: .5rem .75rem;
+  color: var(--text3); font-size: .68rem; letter-spacing: .08em;
+  text-transform: uppercase; border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.event-table td { padding: .55rem .75rem; border-bottom: 1px solid var(--border); }
+.event-table tr:last-child td { border-bottom: none; }
+.event-table tr:hover td { background: rgba(255,255,255,.02); }
+.badge {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .2rem .55rem; border-radius: 4px;
+  font-size: .68rem; font-weight: 600; letter-spacing: .04em;
+}
+.badge.ok { background: rgba(63,185,80,.15); color: var(--green); }
+.badge.fail { background: rgba(248,81,73,.15); color: var(--red); }
+
+/* ── TWO COL ── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media(max-width:768px) { .two-col { grid-template-columns: 1fr; } }
+
+/* ── SIMULATOR ── */
+.sim-wrap {
+  display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem;
+  align-items: start;
+}
+@media(max-width:900px) { .sim-wrap { grid-template-columns: 1fr; } }
+
+.sim-controls { display: flex; flex-direction: column; gap: 1rem; }
+.sim-label { font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text3); margin-bottom: .4rem; }
+
+.select-styled {
+  width: 100%; background: var(--bg3); border: 1px solid var(--border2);
+  color: var(--text); font-family: 'Syne', sans-serif; font-size: .85rem;
+  padding: .6rem .9rem; border-radius: var(--radius); cursor: pointer;
+  appearance: none; outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b949e' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right .75rem center;
+}
+.select-styled:focus { border-color: var(--accent); }
+
+input[type=range] {
+  width: 100%; accent-color: var(--accent);
+  height: 4px; cursor: pointer;
+}
+
+.sim-output {
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 1.5rem;
+}
+.sim-gauge-wrap { display: flex; align-items: center; gap: 2rem; margin-bottom: 1.5rem; }
+.sim-gauge {
+  width: 120px; height: 120px; flex-shrink: 0;
+  position: relative;
+}
+.sim-gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.gauge-bg { fill: none; stroke: var(--bg2); stroke-width: 10; }
+.gauge-fill { fill: none; stroke-width: 10; stroke-linecap: round;
+              transition: stroke-dashoffset .6s cubic-bezier(.4,0,.2,1), stroke .3s; }
+.gauge-label {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+.gauge-hours { font-size: 1.5rem; font-weight: 800; line-height: 1; }
+.gauge-unit  { font-size: .65rem; color: var(--text2); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin-top: .2rem; }
+
+.sim-info { flex: 1; }
+.sim-pred-label { font-size: .75rem; color: var(--text2); margin-bottom: .25rem; }
+.sim-pred-big { font-size: 1.8rem; font-weight: 800; line-height: 1; }
+.sim-pred-sub { font-size: .78rem; color: var(--text2); margin-top: .4rem; line-height: 1.5; }
+.sim-alert-box {
+  padding: .75rem 1rem; border-radius: var(--radius);
+  font-size: .82rem; font-weight: 600; margin-top: .75rem;
+  display: flex; align-items: center; gap: .5rem;
+}
+.sim-alert-box.alert { background: rgba(248,81,73,.12); border: 1px solid rgba(248,81,73,.3); color: var(--red); }
+.sim-alert-box.ok    { background: rgba(63,185,80,.10); border: 1px solid rgba(63,185,80,.25); color: var(--green); }
+
+/* ── METHODOLOGY ── */
+.method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 1rem; }
+.method-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 1.25rem;
+  position: relative;
+}
+.method-num {
+  font-size: 3rem; font-weight: 800; line-height: 1;
+  color: var(--border2); position: absolute; top: .75rem; right: 1rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+.method-icon { font-size: 1.5rem; margin-bottom: .75rem; }
+.method-title { font-size: .9rem; font-weight: 700; margin-bottom: .4rem; }
+.method-desc { font-size: .78rem; color: var(--text2); line-height: 1.6; }
+.method-tag {
+  display: inline-block; margin-top: .6rem;
+  background: var(--bg3); border: 1px solid var(--border2);
+  padding: .15rem .5rem; border-radius: 4px;
+  font-size: .65rem; font-family: 'JetBrains Mono', monospace; color: var(--text3);
+}
+
+/* ── FOOTER ── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 2rem; margin-top: 4rem;
+  text-align: center;
+  color: var(--text3); font-size: .75rem; line-height: 1.8;
+  position: relative; z-index: 1;
+}
+
+/* ── ANIMATIONS ── */
+.fade-in { opacity: 0; transform: translateY(16px); animation: fadeIn .5s forwards; }
+@keyframes fadeIn { to { opacity:1; transform:none; } }
+
+.section-content { display: none; }
+.section-content.active { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <span>Kelmarsh Wind Farm · T1</span>
+  </div>
+  <nav>
+    <a href="#resumen" class="active" onclick="showSection('resumen',this)">Resumen</a>
+    <a href="#modelos" onclick="showSection('modelos',this)">Modelos</a>
+    <a href="#simulador" onclick="showSection('simulador',this)">Simulador</a>
+    <a href="#metodologia" onclick="showSection('metodologia',this)">Metodología</a>
+  </nav>
+  <div class="status-badge">
+    <div class="dot"></div>
+    Sistema activo · Test 2022
+  </div>
+</header>
+
+<main>
+
+<!-- ═══════════════════════════════ HERO ═══════════════════════════════ -->
+<div class="hero fade-in">
+  <div>
+    <h1 class="hero-title">Mantenimiento<br><span>Predictivo</span><br>con IA</h1>
+    <p class="hero-sub">
+      Pipeline de aprendizaje automático para predecir fallos en turbinas eólicas
+      con días de antelación, usando datos SCADA de 10 minutos.
+      Cuatro modelos de regresión calibrada — uno por familia de fallo.
+    </p>
+  </div>
+  <div class="hero-meta">
+    Turbina T1 · Kelmarsh, UK<br>
+    Datos: 2018 – 2022<br>
+    Modelo: LightGBM + Isotonic Cal.<br>
+    Período de test: Ene–Dic 2022
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ RESUMEN ═══════════════════════════════ -->
+<div id="s-resumen" class="section-content active">
+
+  <div class="section-header">
+    <span class="section-title">Resultados Globales</span>
+    <span class="section-sub">período de test · 12 meses · 51 fallos evaluados</span>
+  </div>
+
+  <div class="kpi-grid" id="kpi-grid">
+    <!-- generado por JS -->
+  </div>
+
+  <div class="section-header">
+    <span class="section-title">Rendimiento por Familia</span>
+    <span class="section-sub">métricas principales</span>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Tabla de Métricas</span>
+      <span style="font-size:.75rem;color:var(--text3);font-family:'JetBrains Mono',monospace">regresión + calibración isotónica</span>
+    </div>
+    <div class="panel-body" style="padding:0">
+      <table class="event-table" id="summary-table" style="margin:0">
+        <thead>
+          <tr>
+            <th>Familia</th>
+            <th>MAE calibrado</th>
+            <th>Precisión</th>
+            <th>Recall</th>
+            <th>Event Recall</th>
+            <th>Fallos detectados</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="summary-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section-header" style="margin-top:2.5rem">
+    <span class="section-title">Event Recall por Familia</span>
+    <span class="section-sub">métrica operativa principal</span>
+  </div>
+  <div class="panel">
+    <div class="panel-body">
+      <div class="chart-wrap" style="height:260px">
+        <canvas id="chart-event-recall"></canvas>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════ MODELOS ═══════════════════════════════ -->
+<div id="s-modelos" class="section-content">
+
+  <div class="section-header">
+    <span class="section-title">Análisis por Familia</span>
+    <span class="section-sub">timeline de alertas · predicho vs real · eventos</span>
+  </div>
+
+  <div class="family-tabs" id="family-tabs"></div>
+
+  <div id="family-panel">
+    <!-- generado por JS -->
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════ SIMULADOR ═══════════════════════════════ -->
+<div id="s-simulador" class="section-content">
+
+  <div class="section-header">
+    <span class="section-title">Simulador de Predicción</span>
+    <span class="section-sub">reproduce lo que el modelo habría predicho en cualquier momento del test</span>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">¿Qué predecía el modelo en una fecha concreta?</span>
+    </div>
+    <div class="panel-body">
+      <div class="sim-wrap">
+        <div class="sim-controls">
+          <div>
+            <div class="sim-label">Familia de fallo</div>
+            <select class="select-styled" id="sim-family" onchange="updateSim()"></select>
+          </div>
+          <div>
+            <div class="sim-label">Posición en el período de test</div>
+            <input type="range" id="sim-slider" min="0" max="100" value="50" oninput="updateSim()">
+            <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--text3);margin-top:.3rem;font-family:'JetBrains Mono',monospace">
+              <span id="sim-date-start"></span>
+              <span id="sim-date-end"></span>
+            </div>
+          </div>
+          <div style="font-size:.75rem;color:var(--text2);line-height:1.6;padding:.75rem;background:var(--bg3);border-radius:var(--radius);border:1px solid var(--border)">
+            Mueve el slider para desplazarte en el tiempo.<br>
+            El sistema muestra la predicción del modelo en ese instante.
+          </div>
+        </div>
+
+        <div class="sim-output">
+          <div style="font-size:.72rem;color:var(--text3);font-family:'JetBrains Mono',monospace;margin-bottom:1rem" id="sim-current-date"></div>
+          <div class="sim-gauge-wrap">
+            <div class="sim-gauge">
+              <svg viewBox="0 0 36 36">
+                <circle class="gauge-bg" cx="18" cy="18" r="15"/>
+                <circle class="gauge-fill" id="gauge-circle" cx="18" cy="18" r="15"
+                        stroke-dasharray="94.25" stroke-dashoffset="94.25"/>
+              </svg>
+              <div class="gauge-label">
+                <div class="gauge-hours" id="gauge-hours">—</div>
+                <div class="gauge-unit">horas</div>
+              </div>
+            </div>
+            <div class="sim-info">
+              <div class="sim-pred-label">Predicción del modelo</div>
+              <div class="sim-pred-big" id="sim-pred-big">— h</div>
+              <div class="sim-pred-sub" id="sim-pred-sub"></div>
+            </div>
+          </div>
+          <div class="sim-alert-box" id="sim-alert-box">
+            <span id="sim-alert-icon">—</span>
+            <span id="sim-alert-text">—</span>
+          </div>
+          <div style="margin-top:1rem;font-size:.75rem;color:var(--text3)">
+            Puntos cercanos en el timeline:
+          </div>
+          <div id="sim-nearby" style="margin-top:.5rem;font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--text2);line-height:2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════ METODOLOGÍA ═══════════════════════════════ -->
+<div id="s-metodologia" class="section-content">
+
+  <div class="section-header">
+    <span class="section-title">Pipeline Técnico</span>
+    <span class="section-sub">arquitectura del sistema de mantenimiento predictivo</span>
+  </div>
+
+  <div class="method-grid">
+    <div class="method-card">
+      <div class="method-num">01</div>
+      <div class="method-icon">🗄️</div>
+      <div class="method-title">Ingesta de Datos</div>
+      <div class="method-desc">Datos SCADA de la turbina T1 de Kelmarsh Wind Farm: 262,944 registros a intervalos de 10 minutos (2018–2022). Limpieza, normalización temporal y arquitectura Bronze/Silver.</div>
+      <span class="method-tag">pandas · parquet</span>
+    </div>
+    <div class="method-card">
+      <div class="method-num">02</div>
+      <div class="method-icon">🏷️</div>
+      <div class="method-title">Etiquetado</div>
+      <div class="method-desc">Para cada familia de fallo se calcula <code>hours_to_fault</code>: horas hasta el próximo evento. Lead times ajustados por familia para equilibrar la clase positiva (5–25%).</div>
+      <span class="method-tag">labeling · lead time</span>
+    </div>
+    <div class="method-card">
+      <div class="method-num">03</div>
+      <div class="method-icon">⚙️</div>
+      <div class="method-title">Feature Engineering</div>
+      <div class="method-desc">Rolling features en 4 ventanas (1h, 6h, 24h, 7d): mean, std, p95 y exceedance. Baseline ratio vs primeros 180 días de operación limpia. Context feature: <code>hours_since_last_fault</code>.</div>
+      <span class="method-tag">rolling · baseline · context</span>
+    </div>
+    <div class="method-card">
+      <div class="method-num">04</div>
+      <div class="method-icon">🤖</div>
+      <div class="method-title">Modelo de Regresión</div>
+      <div class="method-desc">LightGBM Regressor entrenado sobre filas positivas. Target: <code>hours_to_fault</code>. Split temporal 70/10/20 (train/val/test). Early stopping con validación.</div>
+      <span class="method-tag">LightGBM · temporal split</span>
+    </div>
+    <div class="method-card">
+      <div class="method-num">05</div>
+      <div class="method-icon">🎯</div>
+      <div class="method-title">Calibración Isotónica</div>
+      <div class="method-desc">IsotonicRegression sobre el conjunto de validación corrige el sesgo de compresión: el regresor base predice valores centrados; el calibrador mapea predicciones brutas a horas reales.</div>
+      <span class="method-tag">IsotonicRegression · calibration</span>
+    </div>
+    <div class="method-card">
+      <div class="method-num">06</div>
+      <div class="method-icon">🚨</div>
+      <div class="method-title">Sistema de Alertas</div>
+      <div class="method-desc">Umbral de alerta definido en horas con significado operativo directo. Si el modelo predice fallo en menos de N horas, se emite alerta. Evaluación por evento: ¿llegó la alerta antes del fallo?</div>
+      <span class="method-tag">event recall · alert threshold</span>
+    </div>
+  </div>
+
+  <div class="section-header" style="margin-top:2.5rem">
+    <span class="section-title">Familias de Fallo</span>
+    <span class="section-sub">cuatro modelos independientes</span>
+  </div>
+
+  <div class="panel">
+    <div class="panel-body" style="padding:0">
+      <table class="event-table" style="margin:0">
+        <thead>
+          <tr>
+            <th>Familia</th><th>Eventos históricos</th><th>Lead time</th>
+            <th>Umbral alerta</th><th>Señal primaria</th><th>Limitación</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span style="color:var(--yaw);font-weight:600">Yaw / Cable</span></td>
+            <td>187</td><td>75h</td><td>48h</td>
+            <td><code style="font-family:'JetBrains Mono',monospace;font-size:.78rem">cable_windings__baseline_ratio</code></td>
+            <td style="color:var(--text2);font-size:.78rem">—</td>
+          </tr>
+          <tr>
+            <td><span style="color:var(--gen);font-weight:600">Generador</span></td>
+            <td>55</td><td>130h</td><td>72h</td>
+            <td><code style="font-family:'JetBrains Mono',monospace;font-size:.78rem">bearing_temp__p95_7d</code></td>
+            <td style="color:var(--text2);font-size:.78rem">Pocos eventos en test</td>
+          </tr>
+          <tr>
+            <td><span style="color:var(--brake);font-weight:600">Freno / Hidráulico</span></td>
+            <td>58</td><td>130h</td><td>72h</td>
+            <td><code style="font-family:'JetBrains Mono',monospace;font-size:.78rem">gear_oil_pump_pressure__p95_7d</code></td>
+            <td style="color:var(--text2);font-size:.78rem">2/3 fallos en test son en cascada</td>
+          </tr>
+          <tr>
+            <td><span style="color:var(--pitch);font-weight:600">Pitch / Baterías</span></td>
+            <td>30</td><td>293h</td><td>168h</td>
+            <td><code style="font-family:'JetBrains Mono',monospace;font-size:.78rem">motor_current_imbalance__p95_7d</code></td>
+            <td style="color:var(--text2);font-size:.78rem">Pocos eventos en test</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+</main>
+
+<footer>
+  Mantenimiento Predictivo · Kelmarsh Wind Farm T1 · Pipeline ML con LightGBM + Calibración Isotónica<br>
+  Datos: Open Power System Data · Kelmarsh Wind Farm SCADA Dataset (2018–2022)
+</footer>
+
+<script>
+// ═══════════════════════════ DATOS ═══════════════════════════
+// Sustituir DATA con el contenido de dashboard_data.json
+// o cargar dinámicamente si el archivo está en la misma carpeta
+const PLACEHOLDER = {
+  yaw_cable:   { mae_cal_h:16.5,  event_recall:1.000, events_detected:24, events_total:24, precision:0.287, recall:0.936 },
+  generator:   { mae_cal_h:22.0,  event_recall:1.000, events_detected:4,  events_total:4,  precision:0.090, recall:1.000 },
+  brake_hydro: { mae_cal_h:25.0,  event_recall:1.000, events_detected:3,  events_total:3,  precision:0.075, recall:1.000 },
+  pitch_bat:   { mae_cal_h:70.0,  event_recall:1.000, events_detected:2,  events_total:2,  precision:0.160, recall:0.947 },
+};
+
+const FAM_META = {
+  yaw_cable:   { label:'Yaw / Cable',       color:'#378ADD', lead:75,  alert_h:48  },
+  generator:   { label:'Generador',          color:'#D85A30', lead:130, alert_h:72  },
+  brake_hydro: { label:'Freno / Hidráulico', color:'#BA7517', lead:130, alert_h:72  },
+  pitch_bat:   { label:'Pitch / Baterías',   color:'#1D9E75', lead:293, alert_h:168 },
+};
+
+let DATA = null;
+
+async function loadData() {
+  try {
+    // Intenta cargar el JSON real (requiere servidor HTTP o mismo directorio)
+    const r = await fetch('./dashboard_data.json');
+    if (r.ok) {
+      DATA = await r.json();
+      console.log('✅ Datos reales cargados');
+    } else throw new Error('no json');
+  } catch {
+    // Usa datos de demostración embebidos
+    console.log('⚠️ Usando datos de demostración (coloca dashboard_data.json junto al HTML)');
+    DATA = buildDemoData();
+  }
+  init();
+}
+
+function buildDemoData() {
+  const families = {};
+  Object.entries(FAM_META).forEach(([k, m]) => {
+    const n = 300;
+    const timeline = Array.from({length:n}, (_,i) => {
+      const base = 0.35 + 0.15*Math.sin(i/20) + 0.1*Math.random();
+      return {
+        ts: new Date(2021,2,14 + Math.floor(i*280/n/30)*30,0,0,0).toISOString().slice(0,16),
+        alert_score: Math.min(1, Math.max(0, +base.toFixed(3))),
+        pred_h: +(m.lead * (1-base)).toFixed(1),
+        is_pre: Math.random() < .25 ? 1 : 0,
+      };
+    });
+    const evCount = {yaw_cable:24, generator:4, brake_hydro:3, pitch_bat:2}[k];
+    const events = Array.from({length:evCount}, (_,i) => ({
+      date: new Date(2021, 3+Math.floor(i*8/evCount), 1+i*3%28).toISOString().slice(0,10),
+      min_pred_h: +(m.alert_h * (.3 + .5*Math.random())).toFixed(1),
+      detected: true,
+    }));
+    const scatter = Array.from({length:200}, () => {
+      const x = Math.random() * m.lead;
+      return { x: +x.toFixed(1), y: +(x + (Math.random()-.5)*m.lead*.4).toFixed(1) };
+    });
+    const pm = PLACEHOLDER[k];
+    families[k] = {
+      label: m.label, color: m.color,
+      lead_hours: m.lead, alert_h: m.alert_h,
+      metrics: { mae_cal_h: pm.mae_cal_h, mae_raw_h: pm.mae_cal_h+8,
+                 precision: pm.precision, recall: pm.recall,
+                 event_recall: pm.event_recall,
+                 events_detected: pm.events_detected, events_total: pm.events_total },
+      timeline, events, scatter,
+      test_start:'2022-01-01', test_end:'2022-12-31',
+    };
+  });
+  return { families, generated_at: new Date().toISOString() };
+}
+
+// ═══════════════════════════ INIT ═══════════════════════════
+function init() {
+  buildKPIs();
+  buildSummaryTable();
+  buildEventRecallChart();
+  buildFamilyTabs();
+  showFamily(Object.keys(FAM_META)[0]);
+  buildSimulator();
+}
+
+// ═══════════════════════════ KPIs ═══════════════════════════
+function buildKPIs() {
+  const fams = DATA.families;
+  const totalEvents = Object.values(fams).reduce((s,f) => s + f.metrics.events_total, 0);
+  const detectedEvents = Object.values(fams).reduce((s,f) => s + f.metrics.events_detected, 0);
+  const avgMAE = (Object.values(fams).reduce((s,f) => s + f.metrics.mae_cal_h, 0) / 4).toFixed(1);
+  const bestMAE = Math.min(...Object.values(fams).map(f=>f.metrics.mae_cal_h)).toFixed(1);
+
+  const kpis = [
+    { label:'Fallos Detectados', value:`${detectedEvents}/${totalEvents}`, unit:'', desc:'Event Recall global en período de test', accent:'#58a6ff' },
+    { label:'Event Recall Global', value:`${(detectedEvents/totalEvents*100).toFixed(0)}`, unit:'%', desc:'Porcentaje de fallos con alerta previa', accent:'#3fb950' },
+    { label:'MAE Mejor Modelo', value:bestMAE, unit:'h', desc:'Error medio de predicción (yaw/cable)', accent:'#d29922' },
+    { label:'MAE Medio', value:avgMAE, unit:'h', desc:'Error medio entre las 4 familias', accent:'#a371f7' },
+    { label:'Familias Monitorizadas', value:'4', unit:'', desc:'Yaw·Cable · Generador · Freno·Hid. · Pitch·Bat.', accent:'#58a6ff' },
+    { label:'Período de Test', value:'12', unit:'meses', desc:'Enero → Diciembre 2022', accent:'#39d353' },
+  ];
+
+  document.getElementById('kpi-grid').innerHTML = kpis.map(k => `
+    <div class="kpi-card" style="--accent-card:${k.accent}">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value">${k.value}<span class="unit">${k.unit}</span></div>
+      <div class="kpi-desc">${k.desc}</div>
+    </div>
+  `).join('');
+}
+
+// ═══════════════════════════ SUMMARY TABLE ═══════════════════════════
+function buildSummaryTable() {
+  const rows = Object.entries(DATA.families).map(([k,f]) => {
+    const m = f.metrics;
+    const ok = m.event_recall >= .8;
+    return `<tr>
+      <td><span style="color:${f.color};font-weight:600">${f.label}</span></td>
+      <td style="font-family:'JetBrains Mono',monospace">${m.mae_cal_h}h</td>
+      <td style="font-family:'JetBrains Mono',monospace">${(m.precision*100).toFixed(1)}%</td>
+      <td style="font-family:'JetBrains Mono',monospace">${(m.recall*100).toFixed(1)}%</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:700;color:${ok?'var(--green)':'var(--orange)'}">${(m.event_recall*100).toFixed(0)}%</td>
+      <td style="font-family:'JetBrains Mono',monospace">${m.events_detected} / ${m.events_total}</td>
+      <td><span class="badge ${ok?'ok':'fail'}">${ok?'✓ Objetivo':'⚠ Revisar'}</span></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('summary-tbody').innerHTML = rows;
+}
+
+// ═══════════════════════════ EVENT RECALL CHART ═══════════════════════════
+function buildEventRecallChart() {
+  const fams = DATA.families;
+  new Chart(document.getElementById('chart-event-recall'), {
+    type: 'bar',
+    data: {
+      labels: Object.values(fams).map(f=>f.label),
+      datasets: [{
+        label: 'Event Recall',
+        data: Object.values(fams).map(f=>f.metrics.event_recall),
+        backgroundColor: Object.values(fams).map(f=>f.color+'cc'),
+        borderColor: Object.values(fams).map(f=>f.color),
+        borderWidth: 1, borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` Event Recall: ${(ctx.raw*100).toFixed(0)}%`
+          }
+        }
+      },
+      scales: {
+        y: {
+          min: 0, max: 1.05,
+          ticks: { color:'#8b949e', callback: v=>(v*100)+'%' },
+          grid: { color:'#21262d' },
+        },
+        x: { ticks: { color:'#8b949e' }, grid: { display:false } }
+      },
+      animation: { duration: 800 }
+    }
+  });
+}
+
+// ═══════════════════════════ FAMILY TABS ═══════════════════════════
+let activeFamily = null;
+let charts = {};
+
+function buildFamilyTabs() {
+  const tabs = document.getElementById('family-tabs');
+  tabs.innerHTML = Object.entries(DATA.families).map(([k,f]) => `
+    <button class="tab-btn" id="tab-${k}" onclick="showFamily('${k}')">
+      <span class="tab-dot" style="background:${f.color}"></span>
+      ${f.label}
+    </button>
+  `).join('');
+}
+
+function showFamily(key) {
+  activeFamily = key;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById(`tab-${key}`);
+  if (btn) {
+    btn.classList.add('active');
+    btn.style.background = FAM_META[key].color;
+    btn.style.borderColor = FAM_META[key].color;
+  }
+
+  const f = DATA.families[key];
+  const m = f.metrics;
+
+  // Destruir charts previos
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
+
+  document.getElementById('family-panel').innerHTML = `
+    <div class="metrics-row">
+      <div class="metric-chip">
+        <div class="lbl">MAE Calibrado</div>
+        <div class="val ${m.mae_cal_h<30?'good':m.mae_cal_h<60?'warn':'bad'}">${m.mae_cal_h}<span style="font-size:.8rem;font-weight:400">h</span></div>
+      </div>
+      <div class="metric-chip">
+        <div class="lbl">MAE Sin Calibrar</div>
+        <div class="val">${m.mae_raw_h || '—'}<span style="font-size:.8rem;font-weight:400">h</span></div>
+      </div>
+      <div class="metric-chip">
+        <div class="lbl">Precisión</div>
+        <div class="val ${m.precision>.3?'good':m.precision>.1?'warn':'bad'}">${(m.precision*100).toFixed(1)}<span style="font-size:.8rem;font-weight:400">%</span></div>
+      </div>
+      <div class="metric-chip">
+        <div class="lbl">Recall</div>
+        <div class="val ${m.recall>.8?'good':m.recall>.5?'warn':'bad'}">${(m.recall*100).toFixed(1)}<span style="font-size:.8rem;font-weight:400">%</span></div>
+      </div>
+      <div class="metric-chip">
+        <div class="lbl">Event Recall</div>
+        <div class="val ${m.event_recall>=.8?'good':'bad'}">${(m.event_recall*100).toFixed(0)}<span style="font-size:.8rem;font-weight:400">%</span></div>
+      </div>
+      <div class="metric-chip">
+        <div class="lbl">Fallos detectados</div>
+        <div class="val good">${m.events_detected}<span style="font-size:.8rem;font-weight:400"> / ${m.events_total}</span></div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:1rem">
+      <div class="panel-header">
+        <span class="panel-title">Timeline de Urgencia de Alerta — ${f.label}</span>
+        <span style="font-size:.72rem;color:var(--text3);font-family:'JetBrains Mono',monospace">1 = fallo inminente · umbral ${f.alert_h}h</span>
+      </div>
+      <div class="panel-body">
+        <div class="chart-wrap" style="height:220px">
+          <canvas id="chart-timeline"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Predicho vs Real (calibrado)</span>
+          <span style="font-size:.72rem;color:var(--text3)">MAE = ${m.mae_cal_h}h</span>
+        </div>
+        <div class="panel-body">
+          <div class="chart-wrap" style="height:260px">
+            <canvas id="chart-scatter"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Eventos en Período de Test</span>
+        </div>
+        <div class="panel-body" style="padding:0">
+          <table class="event-table">
+            <thead><tr><th>Fecha</th><th>Pred. mín.</th><th>Estado</th></tr></thead>
+            <tbody>
+              ${f.events.map(e=>`
+                <tr>
+                  <td style="font-family:'JetBrains Mono',monospace">${e.date}</td>
+                  <td style="font-family:'JetBrains Mono',monospace">${e.min_pred_h}h</td>
+                  <td><span class="badge ${e.detected?'ok':'fail'}">${e.detected?'✓ Detectado':'✗ Perdido'}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Renderizar charts
+  setTimeout(() => {
+    buildTimelineChart(key, f);
+    buildScatterChart(key, f);
+  }, 50);
+}
+
+function buildTimelineChart(key, f) {
+  const tl = f.timeline;
+  const labels = tl.map(p => p.ts ? p.ts.slice(0,10) : '');
+  const alertData = tl.map(p => p.alert_score);
+  const alertLine = 1 - f.alert_h / f.lead_hours;
+
+  const ctx = document.getElementById('chart-timeline');
+  if (!ctx) return;
+
+  charts.timeline = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Urgencia de alerta',
+          data: alertData,
+          borderColor: f.color,
+          backgroundColor: f.color+'22',
+          borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3,
+        },
+        {
+          label: `Umbral ${f.alert_h}h`,
+          data: Array(labels.length).fill(alertLine),
+          borderColor: '#f85149', borderDash: [4,4],
+          borderWidth: 1.5, pointRadius: 0, fill: false,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color:'#8b949e', font:{size:11} } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.datasetIndex === 0
+              ? ` Urgencia: ${(ctx.raw*100).toFixed(0)}%  |  Pred: ${f.timeline[ctx.dataIndex]?.pred_h}h`
+              : ` Umbral alerta`
+          }
+        }
+      },
+      scales: {
+        y: { min:0, max:1.05, ticks:{color:'#8b949e',callback:v=>(v*100)+'%'}, grid:{color:'#21262d'} },
+        x: { ticks:{color:'#8b949e', maxTicksLimit:8, maxRotation:0}, grid:{display:false} }
+      },
+      animation: { duration:500 }
+    }
+  });
+
+  // Añadir líneas de eventos
+  const events = f.events;
+  if (events.length && charts.timeline) {
+    const plugin = {
+      id: 'eventLines',
+      afterDraw(chart) {
+        const {ctx, scales:{x,y}} = chart;
+        events.forEach(ev => {
+          const idx = labels.findIndex(l => l >= ev.date);
+          if (idx < 0) return;
+          const xPos = x.getPixelForValue(idx);
+          ctx.save();
+          ctx.strokeStyle = ev.detected ? '#3fb950' : '#f85149';
+          ctx.lineWidth = 2; ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(xPos, y.top);
+          ctx.lineTo(xPos, y.bottom);
+          ctx.stroke(); ctx.restore();
+        });
+      }
+    };
+    charts.timeline.options.plugins.eventLines = {};
+    Chart.register(plugin);
+    charts.timeline.update();
+  }
+}
+
+function buildScatterChart(key, f) {
+  const ctx = document.getElementById('chart-scatter');
+  if (!ctx) return;
+  const diag = [{x:0,y:0},{x:f.lead_hours,y:f.lead_hours}];
+
+  charts.scatter = new Chart(ctx, {
+    type: 'scatter',
+    data: {
+      datasets: [
+        {
+          label: 'Predicciones',
+          data: f.scatter,
+          backgroundColor: f.color+'66',
+          borderColor: f.color+'99',
+          pointRadius: 3, borderWidth: 1,
+        },
+        {
+          label: 'Predicción perfecta',
+          data: diag, type:'line',
+          borderColor:'#484f58', borderDash:[4,4],
+          borderWidth:1.5, pointRadius:0, fill:false,
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend:{ labels:{color:'#8b949e',font:{size:11}} } },
+      scales: {
+        x: { min:0, max:f.lead_hours, title:{display:true,text:'Horas reales',color:'#8b949e'}, ticks:{color:'#8b949e'}, grid:{color:'#21262d'} },
+        y: { min:0, max:f.lead_hours, title:{display:true,text:'Horas predichas',color:'#8b949e'}, ticks:{color:'#8b949e'}, grid:{color:'#21262d'} }
+      },
+      animation:{duration:400}
+    }
+  });
+}
+
+// ═══════════════════════════ SIMULATOR ═══════════════════════════
+function buildSimulator() {
+  const sel = document.getElementById('sim-family');
+  sel.innerHTML = Object.entries(DATA.families).map(([k,f])=>
+    `<option value="${k}">${f.label}</option>`
+  ).join('');
+  updateSim();
+}
+
+function updateSim() {
+  const key = document.getElementById('sim-family').value;
+  const pct = +document.getElementById('sim-slider').value / 100;
+  const f   = DATA.families[key];
+  if (!f) return;
+
+  document.getElementById('sim-date-start').textContent = f.test_start;
+  document.getElementById('sim-date-end').textContent   = f.test_end;
+
+  const tl  = f.timeline;
+  const idx = Math.min(Math.floor(pct * tl.length), tl.length-1);
+  const pt  = tl[idx];
+
+  document.getElementById('sim-current-date').textContent =
+    `📅 ${pt.ts ? pt.ts.slice(0,16) : '—'}`;
+
+  const predH     = pt.pred_h;
+  const alertLine = f.alert_h;
+  const isAlert   = predH <= alertLine;
+  const urgency   = 1 - predH / f.lead_hours;
+  const circ      = 94.25;
+  const offset    = circ * (1 - Math.max(0, Math.min(1, urgency)));
+
+  const gaugeColor = urgency > .7 ? '#f85149' : urgency > .4 ? '#d29922' : '#3fb950';
+  const gc = document.getElementById('gauge-circle');
+  gc.style.strokeDashoffset = offset;
+  gc.style.stroke = gaugeColor;
+
+  document.getElementById('gauge-hours').textContent = Math.round(predH);
+  document.getElementById('gauge-hours').style.color = gaugeColor;
+  document.getElementById('sim-pred-big').textContent = `${predH}h`;
+  document.getElementById('sim-pred-big').style.color = gaugeColor;
+
+  const days = (predH / 24).toFixed(1);
+  document.getElementById('sim-pred-sub').textContent =
+    `≈ ${days} días hasta el próximo fallo de ${f.label.toLowerCase()}\nUmbral de alerta: ${alertLine}h`;
+
+  const box  = document.getElementById('sim-alert-box');
+  const icon = document.getElementById('sim-alert-icon');
+  const txt  = document.getElementById('sim-alert-text');
+
+  if (isAlert) {
+    box.className = 'sim-alert-box alert';
+    icon.textContent = '🚨';
+    txt.textContent = `ALERTA — Fallo predicho en ${predH}h (< umbral ${alertLine}h). Programar mantenimiento.`;
+  } else {
+    box.className = 'sim-alert-box ok';
+    icon.textContent = '✅';
+    txt.textContent = `Sin alerta — predicción de ${predH}h supera el umbral de ${alertLine}h.`;
+  }
+
+  // Puntos cercanos
+  const nearby = tl.slice(Math.max(0,idx-2), Math.min(tl.length, idx+3));
+  document.getElementById('sim-nearby').innerHTML = nearby.map((p,i) => {
+    const marker = i===2 ? '→ ' : '  ';
+    return `${marker}${p.ts?.slice(0,16) || '—'}  pred=${p.pred_h}h  score=${(p.alert_score*100).toFixed(0)}%`;
+  }).join('<br>');
+}
+
+// ═══════════════════════════ NAVIGATION ═══════════════════════════
+function showSection(id, el) {
+  document.querySelectorAll('.section-content').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+  document.getElementById(`s-${id}`).classList.add('active');
+  if (el) el.classList.add('active');
+
+  if (id === 'modelos' && activeFamily) showFamily(activeFamily);
+  if (id === 'simulador') updateSim();
+  return false;
+}
+
+// ═══════════════════════════ BOOT ═══════════════════════════
+loadData();
+</script>
+</body>
+</html>

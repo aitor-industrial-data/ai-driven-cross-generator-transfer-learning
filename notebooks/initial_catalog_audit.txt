@@ -1,63 +1,76 @@
 CATÁLOGO DE CÓDIGOS CRÍTICOS IDENTIFICADOS (PREFILTRO)
 ============================================================
 
-Code                           Message  Status  Failure_Frequency
- 710                      Battery test    Stop                197
-6052            High yaw motor current Warning                132
-6200                  Cable autounwind    Stop                 66
-  20             Manual stop - on site    Stop                 53
-6525               4-20mA anemometer 2 Warning                 37
-6635                    4-20 mA vane 2 Warning                 37
-5760  Hydraulic oil flushing operation    Stop                 32
-2125              Timeout brake closed Warning                 31
-8400                 Comm. failure FPM Warning                 24
-5720          Brake accumulator defect Warning                 22
-3000     Frequency converter not ready    Stop                 21
-3500                         Grid loss    Stop                 21
-6054                          Easy yaw Warning                 17
- 716 Battery charge cycle axis 1 error Warning                 17
- 717 Battery charge cycle axis 2 error Warning                 17
- 718 Battery charge cycle axis 3 error Warning                 17
-2550          Overload generator fan 1 Warning                 13
-6530                 Anemometer defect    Stop                 12
-2650          Overload generator fan 2 Warning                 11
-2655          Overload generator fan 3 Warning                 11
-2674        Overload generator heating Warning                 11
-4510       Tower oscillation Y level 1    Stop                 11
-  25         Manual stop without login    Stop                 10
-4540       Tower oscillation X level 2    Stop                  8
-8000                  Park master stop    Stop                  8
- 210                      Manual brake    Stop                  7
-3125      Timeout ready for connection    Stop                  7
-  59                 Max. acceleration Warning                  7
-  21              Manual stop - remote    Stop                  6
-6540                Icing (anemometer)    Stop                  6
- 785          Error brake resistor CHP Warning                  6
-3590                       Overvoltage    Stop                  5
-5510            Low hydraulic pressure    Stop                  5
-  68     Deviation winddirection > 60°    Stop                  5
- 707                 Stop battery test    Stop                  5
- 850      Error lubrication pump pitch Warning                  4
-1860            Oil filter gear choked Warning                  3
- 440              Repeating error BP 0 Warning                  3
- 675       Pitch measuring system 1><2 Warning                  3
- 683     Limit switch error 95° axis 3 Warning                  3
-7325    Time sync. failed (SNTP error) Warning                  3
-2000                   Brake pads worn Warning                  2
-3585            Maximum grid frequency    Stop                  2
-6682        Icing (dev. electr. power) Warning                  2
-6690                      Icing (stop)    Stop                  2
- 681     Limit switch error 95° axis 1 Warning                  2
- 682     Limit switch error 95° axis 2 Warning                  2
- 692    Pitch run-away (hub box v.>=4)    Stop                  2
- 100                 Safety chain open    Stop                  1
-1070       Drive train monitor level 2    Stop                  1
-3110         Frequency converter error    Stop                  1
-3570                        Grid error    Stop                  1
-4500                   Tower resonance    Stop                  1
-5700     Max. operation time hydraulic    Stop                  1
-6120         Uncontrolled yaw movement    Stop                  1
-6300                         Yaw error    Stop                  1
-  64                   Max. wind speed    Stop                  1
- 720    Pitch batteries charging cycle Warning                  1
-7324        Check time synchronization Warning                  1
+Code                                  Message  Status  Failure_Frequency
+ 710                             Battery test    Stop                248
+6052                   High yaw motor current Warning                186
+6525                      4-20mA anemometer 2 Warning                174
+6635                           4-20 mA vane 2 Warning                174
+6200                         Cable autounwind    Stop                 83
+  20                    Manual stop - on site    Stop                 76
+6530                        Anemometer defect    Stop                 75
+2125                     Timeout brake closed Warning                 47
+5760         Hydraulic oil flushing operation    Stop                 41
+5720                 Brake accumulator defect Warning                 39
+8400                        Comm. failure FPM Warning                 32
+3500                                Grid loss    Stop                 25
+6054                                 Easy yaw Warning                 22
+3000            Frequency converter not ready    Stop                 21
+  25                Manual stop without login    Stop                 19
+ 716        Battery charge cycle axis 1 error Warning                 18
+ 717        Battery charge cycle axis 2 error Warning                 18
+ 718        Battery charge cycle axis 3 error Warning                 18
+2550                 Overload generator fan 1 Warning                 16
+2674               Overload generator heating Warning                 14
+4510              Tower oscillation Y level 1    Stop                 13
+2650                 Overload generator fan 2 Warning                 12
+4540              Tower oscillation X level 2    Stop                 12
+2655                 Overload generator fan 3 Warning                 11
+ 440                     Repeating error BP 0 Warning                 11
+ 210                             Manual brake    Stop                  9
+  21                     Manual stop - remote    Stop                  8
+  59                        Max. acceleration Warning                  8
+  61                             Wind < power    Stop                  8
+ 785                 Error brake resistor CHP Warning                  8
+8000                         Park master stop    Stop                  8
+3125             Timeout ready for connection    Stop                  7
+5510                   Low hydraulic pressure    Stop                  7
+6540                       Icing (anemometer)    Stop                  7
+  68            Deviation winddirection > 60°    Stop                  7
+ 707                        Stop battery test    Stop                  7
+ 720           Pitch batteries charging cycle Warning                  6
+3590                              Overvoltage    Stop                  5
+7324               Check time synchronization Warning                  4
+ 850             Error lubrication pump pitch Warning                  4
+1860                   Oil filter gear choked Warning                  3
+6682               Icing (dev. electr. power) Warning                  3
+6690                             Icing (stop)    Stop                  3
+ 675              Pitch measuring system 1><2 Warning                  3
+ 683            Limit switch error 95° axis 3 Warning                  3
+7325           Time sync. failed (SNTP error) Warning                  3
+2000                          Brake pads worn Warning                  2
+3585                   Maximum grid frequency    Stop                  2
+6620                              Vane defect    Stop                  2
+6622                            Vane 2 defect Warning                  2
+ 681            Limit switch error 95° axis 1 Warning                  2
+ 682            Limit switch error 95° axis 2 Warning                  2
+ 692           Pitch run-away (hub box v.>=4)    Stop                  2
+ 100                        Safety chain open    Stop                  1
+1070              Drive train monitor level 2    Stop                  1
+3110                Frequency converter error    Stop                  1
+3160                           Cable overload Warning                  1
+3205 PT100 converter inlet temperature defect Warning                  1
+3220                  Reduced power converter Warning                  1
+3570                               Grid error    Stop                  1
+3870      Overload transformer fan outlet air Warning                  1
+4500                          Tower resonance    Stop                  1
+4520              Tower oscillation X level 1    Stop                  1
+ 455                     Repeating error BP52    Stop                  1
+4600              PT100 base box temp. defect Warning                  1
+4607              Heating/fan base box faulty Warning                  1
+5000                 Breakdown obstacle light Warning                  1
+5700            Max. operation time hydraulic    Stop                  1
+6120                Uncontrolled yaw movement    Stop                  1
+6300                                Yaw error    Stop                  1
+  64                          Max. wind speed    Stop                  1
+6515                      4-20mA anemometer 1 Warning                  1
