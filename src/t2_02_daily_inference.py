@@ -1,7 +1,7 @@
 """
 Inferencia diaria sobre Turbina 2.
 Ejecutar cada día mediante cron o EventBridge.
-Produce UNA fila en predictions_log.csv por familia con la predicción del día.
+Produce UNA fila en t2_predictions_log.csv por familia con la predicción del día.
 
 Lógica de fechas:
   - "Hoy" = fecha real del sistema en el momento de ejecución (pd.Timestamp.now())
@@ -95,7 +95,7 @@ def run_daily_inference():
     fault_log_path = os.path.join(SILVER_DIR, f'turbine_{TURBINE_ID}_fault_log.csv')
     fault_log = pd.read_csv(fault_log_path, parse_dates=['timestamp'])         if os.path.exists(fault_log_path)         else pd.DataFrame(columns=['timestamp', 'family'])
 
-    pred_log_path  = os.path.join(MODELS_DIR, 'predictions_log.csv')
+    pred_log_path  = os.path.join(MODELS_DIR, 't2_predictions_log.csv')
     results_today  = []
 
     for family, cfg in FAMILIES.items():

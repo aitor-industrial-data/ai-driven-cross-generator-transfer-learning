@@ -1,4 +1,4 @@
-📋 CATALOGO TOTAL DE AVERIAS DE FUNCIONAMIENTO COMPLETO (53 EVENTOS)
+📋 CATALOGO TOTAL DE AVERIAS DE FUNCIONAMIENTO COMPLETO (52 EVENTOS)
 ====================================================================================================
 CÓDIGO   | MENSAJE                                  | STATUS   | CATEGORÍA CONTRACTUAL
 ----------------------------------------------------------------------------------------------------
@@ -53,5 +53,4 @@ CÓDIGO   | MENSAJE                                  | STATUS   | CATEGORÍA CON
 718      | Battery charge cycle axis 3 error        | Warning  | Warnings (27)
 720      | Pitch batteries charging cycle           | Warning  | Warnings (27)
 785      | Error brake resistor CHP                 | Warning  | Warnings (27)
-8400     | Comm. failure FPM                        | Warning  | Warnings (27)
 850      | Error lubrication pump pitch             | Warning  | Warnings (27)
