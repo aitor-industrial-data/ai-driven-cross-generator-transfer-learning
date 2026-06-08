@@ -536,7 +536,7 @@ footer {
 
   <div class="section-header">
     <span class="section-title">Resultados Globales</span>
-    <span class="section-sub">período de test · 12 meses · 46 fallos evaluados</span>
+    <span class="section-sub">período de test · 12 meses · 44 fallos evaluados</span>
   </div>
 
   <div class="kpi-grid" id="kpi-grid">
@@ -739,13 +739,13 @@ footer {
         <tbody>
           <tr>
             <td><span style="color:var(--yaw);font-weight:600">Yaw / Cable</span></td>
-            <td>187</td><td>75h</td><td>48h</td>
+            <td>187</td><td>83h</td><td>48h</td>
             <td><code style="font-family:'JetBrains Mono',monospace;font-size:.78rem">cable_windings__baseline_ratio</code></td>
             <td style="color:var(--text2);font-size:.78rem">—</td>
           </tr>
           <tr>
             <td><span style="color:var(--gen);font-weight:600">Generador</span></td>
-            <td>55</td><td>130h</td><td>72h</td>
+            <td>55</td><td>127h</td><td>72h</td>
             <td><code style="font-family:'JetBrains Mono',monospace;font-size:.78rem">bearing_temp__p95_7d</code></td>
             <td style="color:var(--text2);font-size:.78rem">Pocos eventos en test</td>
           </tr>
@@ -757,7 +757,7 @@ footer {
           </tr>
           <tr>
             <td><span style="color:var(--pitch);font-weight:600">Pitch / Baterías</span></td>
-            <td>30</td><td>293h</td><td>168h</td>
+            <td>30</td><td>295h</td><td>168h</td>
             <td><code style="font-family:'JetBrains Mono',monospace;font-size:.78rem">motor_current_imbalance__p95_7d</code></td>
             <td style="color:var(--text2);font-size:.78rem">Pocos eventos en test</td>
           </tr>
@@ -1342,9 +1342,9 @@ function showSection(id, el) {
 const OP_S3_URL = 'https://ai-driven-cross-generator-transfer-learning.s3.eu-south-2.amazonaws.com/models/t2_predictions_log.csv';
 
 const OP_FAM_META = {
-  yaw_cable:   { label:'Yaw / Cable',       color:'#378ADD', alert_h:48,  actions:{ critical:'Inspección inmediata del sistema de guiñada y cables. Planificar parada controlada en <24h.', warning:'Programar revisión de cables de guiñada en los próximos 2 días.', ok:'Monitorizar. Sin acción inmediata.' } },
+  yaw_cable:   { label:'Yaw / Cable',       color:'#378ADD', alert_h:48,  actions:{ critical:'Inspección inmediata del sistema de guiñada y cables. Planificar parada controlada en <24h.', warning:'Programar revisión de cables de guiñada.', ok:'Monitorizar. Sin acción inmediata.' } },
   generator:   { label:'Generador',          color:'#D85A30', alert_h:72,  actions:{ critical:'Revisión urgente de rodamientos y temperatura. Contactar equipo de mantenimiento.', warning:'Programar inspección del generador esta semana.', ok:'Sin acción requerida.' } },
-  brake_hydro: { label:'Freno / Hidráulico', color:'#BA7517', alert_h:72,  actions:{ critical:'Verificar presión hidráulica y estado del freno. No diferir mantenimiento.', warning:'Revisar niveles de aceite y presión en próximas 48h.', ok:'Sin acción requerida.' } },
+  brake_hydro: { label:'Freno / Hidráulico', color:'#BA7517', alert_h:72,  actions:{ critical:'Verificar presión hidráulica y estado del freno. No diferir mantenimiento.', warning:'Revisar niveles de aceite y presión.', ok:'Sin acción requerida.' } },
   pitch_bat:   { label:'Pitch / Baterías',   color:'#1D9E75', alert_h:168, actions:{ critical:'Comprobar estado de baterías y sistema de pitch. Riesgo de descontrol de pala.', warning:'Programar test de baterías de pitch esta semana.', ok:'Sin acción requerida.' } },
 };
 
@@ -1621,3 +1621,67 @@ loadData();
 </script>
 </body>
 </html>
+<style>
+/* ══════════════════════════════════════
+   MOBILE RESPONSIVE  (≤ 640px)
+══════════════════════════════════════ */
+@media (max-width: 640px) {
+  header { height:auto; flex-wrap:wrap; padding:.75rem 1rem; gap:.5rem; }
+  .logo span { display:none; }
+  .status-badge { font-size:.65rem; }
+  nav { order:3; width:100%; display:flex; flex-wrap:wrap; gap:.25rem; padding-top:.5rem; border-top:1px solid var(--border); }
+  nav a { font-size:.68rem; padding:.35rem .6rem; flex:1 1 auto; text-align:center; }
+  main { padding:1rem; }
+  .hero { grid-template-columns:1fr; padding:1.5rem 0 1rem; gap:.75rem; }
+  .hero-title { font-size:1.8rem; }
+  .hero-meta { text-align:left; font-size:.68rem; }
+  .kpi-grid { grid-template-columns:1fr 1fr; gap:.6rem; }
+  .kpi-card { padding:.9rem 1rem; }
+  .kpi-value { font-size:1.5rem; }
+  .section-header { margin:1.75rem 0 1rem; }
+  .family-tabs { flex-wrap:nowrap; overflow-x:auto; padding-bottom:.4rem; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+  .family-tabs::-webkit-scrollbar { display:none; }
+  .tab-btn { flex-shrink:0; }
+  .panel-header { flex-wrap:wrap; gap:.4rem; }
+  .metrics-row { grid-template-columns:1fr 1fr; gap:.5rem; }
+  .sim-wrap { grid-template-columns:1fr; gap:1rem; }
+  .sim-gauge-wrap { gap:1rem; }
+  .sim-gauge { width:90px; height:90px; }
+  .gauge-hours { font-size:1.2rem; }
+  .sim-pred-big { font-size:1.4rem; }
+  .panel-body { padding:.75rem; }
+  .event-table, .alert-table { font-size:.72rem; }
+  .event-table th, .alert-table th, .event-table td, .alert-table td { padding:.4rem .5rem; }
+  .alert-table th:nth-child(4), .alert-table td:nth-child(4),
+  .alert-table th:nth-child(8), .alert-table td:nth-child(8) { display:none; }
+  .alert-table-wrap { max-height:340px; }
+  .op-status-grid { grid-template-columns:1fr; gap:.75rem; }
+  .op-hours-big { font-size:2rem; }
+  .op-timeline-grid { grid-template-columns:1fr; }
+  /* alert log controls: en movil rompe en 2 filas y botones táctiles */
+  .panel-header { flex-direction:column; align-items:flex-start; gap:.6rem; }
+  .alert-log-controls { flex-wrap:wrap; gap:.4rem; width:100%; margin:0; overflow-x:visible; padding-bottom:0; }
+  .filter-btn { flex:1 1 calc(33% - .4rem); min-width:70px; text-align:center; font-size:.72rem; padding:.45rem .5rem; min-height:36px; }
+  .log-count-badge { width:100%; text-align:right; margin:0; }
+  .method-grid { grid-template-columns:1fr; }
+  .method-num { font-size:2rem; }
+  .two-col { grid-template-columns:1fr; }
+  .op-pagination { font-size:.68rem; padding:.5rem .75rem; }
+  #summary-table { font-size:.72rem; }
+  #summary-table th:nth-child(3), #summary-table td:nth-child(3),
+  #summary-table th:nth-child(4), #summary-table td:nth-child(4) { display:none; }
+  footer { padding:1.25rem 1rem; font-size:.68rem; margin-top:2rem; }
+}
+
+/* ══════════════════════════════════════
+   TABLET  (641px – 900px)
+══════════════════════════════════════ */
+@media (min-width:641px) and (max-width:900px) {
+  main { padding:1.25rem; }
+  .hero { padding:2rem 0 1.5rem; }
+  .kpi-grid { grid-template-columns:repeat(3,1fr); }
+  .op-status-grid { grid-template-columns:1fr 1fr; }
+  .op-timeline-grid { grid-template-columns:1fr 1fr; }
+  nav a { font-size:.72rem; padding:.35rem .65rem; }
+}
+</style>
