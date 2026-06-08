@@ -243,5 +243,4 @@ def handler(event, context):
 
 if __name__ == '__main__':
     print("🚀 Iniciando prueba local del Handler de AWS Lambda...")
-    handler({}, None)# deploy test lun 08 jun 2026 10:22:58 CEST
-# deploy test
+    handler({}, None)
