@@ -9,11 +9,15 @@ on:
       - 'Dockerfile'
       - 'requirements.txt'
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
-  AWS_REGION:   eu-south-2
-  ECR_REPO:     t2-inference-lambda
-  LAMBDA_NAME:  t2-inference-lambda
-  AWS_ACCOUNT:  610140802215
+  AWS_REGION:  eu-south-2
+  ECR_REPO:    t2-inference-lambda
+  LAMBDA_NAME: t2-inference-lambda
+  AWS_ACCOUNT: 610140802215
 
 jobs:
   deploy:
@@ -24,12 +28,15 @@ jobs:
       - name: Checkout código
         uses: actions/checkout@v4
 
-      - name: Configurar credenciales AWS
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configurar credenciales AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::610140802215:role/github-t2-lambda-role
+          aws-region:     ${{ env.AWS_REGION }}
+          audience:       sts.amazonaws.com
 
       - name: Login en Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
@@ -55,7 +62,6 @@ jobs:
             --query 'imageDetails[0].imageDigest' \
             --output text)
           echo "uri=${IMAGE_URI}@${DIGEST}" >> $GITHUB_OUTPUT
-          echo "Digest resuelto: ${DIGEST}"
 
       - name: Actualizar Lambda con digest
         run: |
