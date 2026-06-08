@@ -7,8 +7,7 @@ import sys
 import boto3
 import pandas as pd
 import numpy as np
-import warnings
-warnings.filterwarnings('ignore')  # temporal para ver el resto del flujo
+
 # Buscamos las funciones de feature engineering que viajan en tu repositorio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'shared'))
 try:
@@ -205,6 +204,7 @@ def handler(event, context):
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=pred_log_key)
         df_existing_log = pd.read_csv(io.BytesIO(response['Body'].read()))
         df_updated_log = pd.concat([df_existing_log, df_results], ignore_index=True)
+        df_updated_log = df_updated_log.drop_duplicates(subset=['date', 'family'], keep='last').reset_index(drop=True)
         logger.info('Concatenando resultados en el registro histórico de predicciones S3.')
     except s3_client.exceptions.NoSuchKey:
         logger.info('Iniciando un nuevo log de predicciones maestro en S3.')
