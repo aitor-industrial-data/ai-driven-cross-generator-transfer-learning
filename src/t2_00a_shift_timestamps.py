@@ -10,7 +10,7 @@ import re
 import logging
 
 # ---------------------------------------------------------------------------
-# CONFIGURACIÓN DE LOGGING (Solo por pantalla)
+# CONFIGURACIÓN DE LOGGING
 # ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
@@ -26,7 +26,7 @@ logger.info("INICIO DEL SCRIPT DE LIMPIEZA - Kelmarsh SCADA")
 logger.info("=" * 70)
 
 # ---------------------------------------------------------------------------
-# IMPORTS DE PYSPARK (con try/except robusto)
+# IMPORTS DE PYSPARK
 # ---------------------------------------------------------------------------
 try:
     from pyspark.sql import SparkSession
@@ -199,7 +199,7 @@ except Exception as e:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# 5. CARGAR CADA ARCHIVO CON SPARK (limpiar comentarios, poner header)
+# 5. CARGAR CADA ARCHIVO CON SPARK
 # ---------------------------------------------------------------------------
 logger.info("")
 logger.info("-" * 70)
