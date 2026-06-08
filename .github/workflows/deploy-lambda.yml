@@ -1,0 +1,69 @@
+name: Deploy t2-inference-lambda
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+      - 'requirements.txt'
+
+env:
+  AWS_REGION:   eu-south-2
+  ECR_REPO:     t2-inference-lambda
+  LAMBDA_NAME:  t2-inference-lambda
+  AWS_ACCOUNT:  610140802215
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Login en Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build y push a ECR
+        env:
+          IMAGE_URI: ${{ env.AWS_ACCOUNT }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance=false \
+            --push \
+            -t $IMAGE_URI:latest .
+
+      - name: Resolver digest exacto
+        id: digest
+        env:
+          IMAGE_URI: ${{ env.AWS_ACCOUNT }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}
+        run: |
+          DIGEST=$(aws ecr describe-images \
+            --repository-name ${{ env.ECR_REPO }} \
+            --image-ids imageTag=latest \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)
+          echo "uri=${IMAGE_URI}@${DIGEST}" >> $GITHUB_OUTPUT
+          echo "Digest resuelto: ${DIGEST}"
+
+      - name: Actualizar Lambda con digest
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_NAME }} \
+            --image-uri ${{ steps.digest.outputs.uri }}
+
+      - name: Esperar a que Lambda esté lista
+        run: |
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_NAME }}
+          echo "✅ Lambda actualizada: ${{ steps.digest.outputs.uri }}"
