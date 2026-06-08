@@ -7,7 +7,8 @@ import sys
 import boto3
 import pandas as pd
 import numpy as np
-
+import warnings
+warnings.filterwarnings('ignore')  # temporal para ver el resto del flujo
 # Buscamos las funciones de feature engineering que viajan en tu repositorio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'shared'))
 try:
