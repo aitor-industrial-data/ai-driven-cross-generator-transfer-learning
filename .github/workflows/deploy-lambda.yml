@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/**'
+      - 'src/t2_daily_inference_serverless.py'
+      - 'src/shared/**'
       - 'Dockerfile'
       - 'requirements.txt'
 
