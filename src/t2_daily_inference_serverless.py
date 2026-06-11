@@ -46,7 +46,7 @@ def _load_feature_store(s3_client: boto3.client, key: str) -> pd.DataFrame | Non
     """Descarga el Feature Store de S3. Devuelve None si no existe todavía."""
     try:
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=key)
-        df = pd.read_csv(io.BytesIO(response['Body'].read()), parse_dates=['timestamp'])
+        df = pd.read_parquet(io.BytesIO(response['Body'].read()))
         return df
     except s3_client.exceptions.NoSuchKey:
         return None
