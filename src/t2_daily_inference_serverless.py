@@ -302,31 +302,47 @@ def handler(event, context):
         return {'statusCode': 200, 'body': 'No se ejecutaron predicciones (modelos no encontrados).'}
 
     # -------------------------------------------------------------------------
-    # PASO 7: Actualizar Log de Predicciones en S3 (append, dedup por date+family)
+    # PASO 7: Actualizar Log de Predicciones en S3 (append)
+    #
+    # Clave de deduplicación: last_data_ts + family.
+    # Esto permite múltiples ejecuciones diarias (o en tiempo real) sin perder
+    # historial. Solo se elimina una fila si ya existe exactamente el mismo
+    # timestamp de datos para la misma familia (rejecución idempotente).
+    #
+    # NUNCA se sobreescribe el historial si hay un error leyendo el log existente.
     # -------------------------------------------------------------------------
 
     df_results = pd.DataFrame(results_today)
+    df_existing_log = None
 
     try:
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=pred_log_key)
         df_existing_log = pd.read_csv(io.BytesIO(response['Body'].read()))
-        df_updated_log  = pd.concat([df_existing_log, df_results], ignore_index=True)
-        df_updated_log  = df_updated_log.drop_duplicates(
-            subset=['date', 'family'], keep='last'
-        ).reset_index(drop=True)
-        logger.info('Log de predicciones actualizado (%d registros totales).', len(df_updated_log))
+        logger.info('Log existente cargado: %d registros.', len(df_existing_log))
     except ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchKey':
-            logger.info('Creando nuevo log de predicciones.')
-            df_updated_log = df_results
+            logger.info('Log de predicciones no existe aún. Se creará.')
         else:
-            logger.error('Error inesperado leyendo el log de predicciones: %s', str(e))
+            logger.error('Error leyendo log de predicciones: %s', str(e))
             raise
+    except Exception as e:
+        # Error leyendo o parseando el CSV existente: no tocar el archivo,
+        # abortar para no perder historial.
+        logger.error('Error parseando log de predicciones existente: %s', str(e))
+        raise
+
+    if df_existing_log is not None:
+        df_updated_log = pd.concat([df_existing_log, df_results], ignore_index=True)
+        df_updated_log = df_updated_log.drop_duplicates(
+            subset=['last_data_ts', 'family'], keep='last'
+        ).reset_index(drop=True)
+    else:
+        df_updated_log = df_results
 
     csv_buffer = io.StringIO()
     df_updated_log.to_csv(csv_buffer, index=False)
     s3_client.put_object(Bucket=BUCKET_NAME, Key=pred_log_key, Body=csv_buffer.getvalue())
-    logger.info('Log de predicciones guardado en S3: %s', pred_log_key)
+    logger.info('Log de predicciones guardado: %d registros totales.', len(df_updated_log))
 
     logger.info('=' * 60)
     logger.info('Pipeline completado. %d predicciones guardadas.', len(results_today))
