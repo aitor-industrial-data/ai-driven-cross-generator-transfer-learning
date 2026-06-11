@@ -44,12 +44,15 @@ COLD_START_HOURS = 9999.0
 
 def _load_feature_store(s3_client: boto3.client, key: str) -> pd.DataFrame | None:
     """Descarga el Feature Store de S3. Devuelve None si no existe todavía."""
+    from botocore.exceptions import ClientError
     try:
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=key)
         df = pd.read_parquet(io.BytesIO(response['Body'].read()))
         return df
-    except s3_client.exceptions.NoSuchKey:
-        return None
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            return None
+        raise
 
 
 def _get_new_telemetry_rows(df_bronze: pd.DataFrame, df_store: pd.DataFrame | None) -> pd.DataFrame:
@@ -66,6 +69,7 @@ def _get_new_telemetry_rows(df_bronze: pd.DataFrame, df_store: pd.DataFrame | No
 
 def handler(event, context):
     """Punto de entrada ejecutado por AWS Lambda."""
+    from botocore.exceptions import ClientError
     logger.info('=' * 60)
     logger.info('INFERENCIA DIARIA SERVERLESS — Turbina %d', TURBINE_ID)
     logger.info('=' * 60)
@@ -117,9 +121,12 @@ def handler(event, context):
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=fault_log_key)
         fault_log = pd.read_csv(io.BytesIO(response['Body'].read()), parse_dates=['timestamp'])
         logger.info('Fault log de T2 cargado: %d registros.', len(fault_log))
-    except s3_client.exceptions.NoSuchKey:
-        logger.info('Fault log no encontrado. T2 en cold start (sin fallos propios registrados).')
-        fault_log = pd.DataFrame(columns=['timestamp', 'family'])
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            logger.info('Fault log no encontrado. T2 en cold start (sin fallos propios registrados).')
+            fault_log = pd.DataFrame(columns=['timestamp', 'family'])
+        else:
+            raise
 
     # -------------------------------------------------------------------------
     # PASO 4: Cargar Feature Store existente e identificar filas nuevas
@@ -256,9 +263,11 @@ def handler(event, context):
         try:
             response = s3_client.get_object(Bucket=BUCKET_NAME, Key=model_key)
             pipeline = pickle.loads(response['Body'].read())
-        except s3_client.exceptions.NoSuchKey:
-            logger.warning('Modelo no encontrado en S3: %s', model_key)
-            continue
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                logger.warning('Modelo no encontrado en S3: %s', model_key)
+                continue
+            raise
 
         lgbm         = pipeline['lgbm']
         calibrator   = pipeline['calibrator']
@@ -295,6 +304,7 @@ def handler(event, context):
     # -------------------------------------------------------------------------
     # PASO 7: Actualizar Log de Predicciones en S3 (append, dedup por date+family)
     # -------------------------------------------------------------------------
+
     df_results = pd.DataFrame(results_today)
 
     try:
@@ -305,13 +315,18 @@ def handler(event, context):
             subset=['date', 'family'], keep='last'
         ).reset_index(drop=True)
         logger.info('Log de predicciones actualizado (%d registros totales).', len(df_updated_log))
-    except s3_client.exceptions.NoSuchKey:
-        logger.info('Creando nuevo log de predicciones.')
-        df_updated_log = df_results
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            logger.info('Creando nuevo log de predicciones.')
+            df_updated_log = df_results
+        else:
+            logger.error('Error inesperado leyendo el log de predicciones: %s', str(e))
+            raise
 
     csv_buffer = io.StringIO()
     df_updated_log.to_csv(csv_buffer, index=False)
     s3_client.put_object(Bucket=BUCKET_NAME, Key=pred_log_key, Body=csv_buffer.getvalue())
+    logger.info('Log de predicciones guardado en S3: %s', pred_log_key)
 
     logger.info('=' * 60)
     logger.info('Pipeline completado. %d predicciones guardadas.', len(results_today))
