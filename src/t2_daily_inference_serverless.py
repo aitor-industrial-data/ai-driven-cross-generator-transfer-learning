@@ -161,38 +161,36 @@ def handler(event, context):
                     df_calc_window['timestamp'].min().date(),
                     df_calc_window['timestamp'].max().date())
 
-        # Calculamos features rolling para todas las familias sobre la ventana completa
-        # Las features de cada familia tienen prefijo por sensor, sin colisión entre familias
-        all_feats_parts = [df_calc_window[['timestamp']].copy()]
+        # Calculamos features rolling para todas las familias sobre la ventana completa.
+        # Construimos un único dict columna→Series para evitar columnas duplicadas,
+        # que ocurren cuando pd.concat recibe partes con nombres solapados.
+        feats_dict = {'timestamp': df_calc_window['timestamp'].values}
 
         for family, cfg in FAMILIES.items():
             fault_times = fault_log[fault_log['family'] == family]['timestamp'].tolist()
-            # Cold start: T2 sin fallos propios → 9999h (no usar fallos de T1)
-            # add_temporal_context con lista vacía ya asigna 8760; lo sobreescribimos con 9999
+
             feats_rolling = make_rolling_features(
                 df_calc_window, FAMILY_SENSORS[family], baseline_mean, baseline_p90
             )
             df_family_feats = pd.concat([df_calc_window[['timestamp']], feats_rolling], axis=1)
             df_family_feats = add_temporal_context(df_family_feats, family, fault_times)
 
-            # Sobreescribir cold start con 9999 cuando no hay fallos propios de T2
+            # Cold start: sobreescribir con 9999 cuando T2 no tiene fallos propios
             if not fault_times:
                 df_family_feats[f'hours_since_last_{family}']     = COLD_START_HOURS
                 df_family_feats[f'hours_since_last_{family}_log'] = float(np.log1p(COLD_START_HOURS))
 
-            # Adjuntamos las columnas de esta familia (sin timestamp duplicado)
-            cols_family = [c for c in df_family_feats.columns if c != 'timestamp']
-            all_feats_parts.append(df_family_feats[cols_family].copy())
+            for col in df_family_feats.columns:
+                if col != 'timestamp' and col not in feats_dict:
+                    feats_dict[col] = df_family_feats[col].values
 
-        # DataFrame completo con todas las features de todas las familias
-        df_all_feats = pd.concat(all_feats_parts, axis=1)
+        # Añadir columnas de dominio físico de add_domain_features que no sean del bronze raw
+        for col in df_calc_window.columns:
+            if col != 'timestamp' and col not in df_bronze.columns and col not in feats_dict:
+                feats_dict[col] = df_calc_window[col].values
 
-        # Añadimos columnas de dominio físico calculadas en add_domain_features
-        domain_cols = [c for c in df_calc_window.columns
-                       if c not in df_bronze.columns or c == 'timestamp']
-        for col in domain_cols:
-            if col != 'timestamp' and col not in df_all_feats.columns:
-                df_all_feats[col] = df_calc_window[col].values
+        # DataFrame garantizado sin columnas duplicadas
+        df_all_feats = pd.DataFrame(feats_dict)
 
         # Filtrar: solo guardamos las filas que corresponden a timestamps nuevos
         df_new_features = df_all_feats[
@@ -207,9 +205,22 @@ def handler(event, context):
         else:
             df_updated_store = df_new_features
 
+        # Forzar tipos consistentes antes de serializar:
+        # el concat de múltiples DataFrames puede dejar columnas como object
+        # cuando hay NaN mezclados con floats. PyArrow rechaza eso.
+        df_updated_store['timestamp'] = pd.to_datetime(df_updated_store['timestamp'])
+        for col in df_updated_store.columns:
+            if col == 'timestamp':
+                continue
+            col_dtype = str(df_updated_store[col].dtype)
+            if col_dtype == 'object':
+                df_updated_store[col] = pd.to_numeric(df_updated_store[col], errors='coerce').astype('float32')
+            elif col_dtype == 'float64':
+                df_updated_store[col] = df_updated_store[col].astype('float32')
+
         # Guardar Feature Store actualizado en S3 (Parquet por eficiencia)
         parquet_buffer = io.BytesIO()
-        df_updated_store.to_parquet(parquet_buffer, index=False)
+        df_updated_store.to_parquet(parquet_buffer, index=False, engine='pyarrow')
         s3_client.put_object(
             Bucket=BUCKET_NAME,
             Key=features_log_key,
