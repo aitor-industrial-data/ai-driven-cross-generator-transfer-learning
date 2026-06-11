@@ -7,6 +7,7 @@ import sys
 import boto3
 import pandas as pd
 import numpy as np
+from botocore.exceptions import ClientError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'shared'))
 try:
@@ -37,39 +38,63 @@ FAMILIES = {
 # 7 días a pasos de 10 minutos
 STEPS_7D = 1008
 
-# Valor de cold start para hours_since_last_fault cuando T2 no tiene fallos propios.
-# 9999 indica al modelo "lleva mucho tiempo sin fallar / sin historial conocido".
+# Cold start: horas asignadas a hours_since_last_fault cuando T2 no tiene fallos propios.
+# Se usa el máximo razonable del dominio de entrenamiento de T1 para no extrapolar.
 COLD_START_HOURS = 9999.0
 
+# Ruta en S3 de cada Feature Store por familia
+# Estructura idéntica a T1: t2_features_{family}.parquet
+# Columnas: timestamp | rolling features | hours_since_last_{family} | hours_since_last_{family}_log
+# (sin targets hours_to_fault / is_pre_fault — T2 está en producción, no en entrenamiento)
+def _feature_store_key(family: str) -> str:
+    return f'models/t2_features_{family}.parquet'
 
-def _load_feature_store(s3_client: boto3.client, key: str) -> pd.DataFrame | None:
-    """Descarga el Feature Store de S3. Devuelve None si no existe todavía."""
-    from botocore.exceptions import ClientError
+
+def _load_parquet_from_s3(s3_client, key: str) -> pd.DataFrame | None:
+    """Descarga un Parquet de S3. Devuelve None si no existe."""
     try:
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=key)
-        df = pd.read_parquet(io.BytesIO(response['Body'].read()))
-        return df
+        return pd.read_parquet(io.BytesIO(response['Body'].read()))
     except ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchKey':
             return None
         raise
 
 
-def _get_new_telemetry_rows(df_bronze: pd.DataFrame, df_store: pd.DataFrame | None) -> pd.DataFrame:
-    """
-    Devuelve las filas de df_bronze que aún no están en el Feature Store.
-    Si el Feature Store no existe, devuelve todo df_bronze.
-    """
+def _get_last_stored_ts(df_store: pd.DataFrame | None) -> pd.Timestamp | None:
+    """Devuelve el último timestamp guardado en el Feature Store, o None si está vacío."""
     if df_store is None or len(df_store) == 0:
-        return df_bronze.copy()
-    last_stored_ts = df_store['timestamp'].max()
-    new_rows = df_bronze[df_bronze['timestamp'] > last_stored_ts].copy()
-    return new_rows
+        return None
+    return df_store['timestamp'].max()
+
+
+def _normalize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fuerza tipos consistentes para serialización PyArrow.
+    El concat de múltiples DataFrames puede dejar columnas object cuando
+    hay NaN mezclados con floats.
+    """
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    for col in df.columns:
+        if col == 'timestamp':
+            continue
+        dtype = str(df[col].dtype)
+        if dtype == 'object':
+            df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
+        elif dtype == 'float64':
+            df[col] = df[col].astype('float32')
+    return df
+
+
+def _save_parquet_to_s3(s3_client, df: pd.DataFrame, key: str) -> None:
+    """Serializa un DataFrame como Parquet y lo sube a S3."""
+    buf = io.BytesIO()
+    df.to_parquet(buf, index=False, engine='pyarrow')
+    s3_client.put_object(Bucket=BUCKET_NAME, Key=key, Body=buf.getvalue())
 
 
 def handler(event, context):
     """Punto de entrada ejecutado por AWS Lambda."""
-    from botocore.exceptions import ClientError
     logger.info('=' * 60)
     logger.info('INFERENCIA DIARIA SERVERLESS — Turbina %d', TURBINE_ID)
     logger.info('=' * 60)
@@ -92,7 +117,6 @@ def handler(event, context):
         logger.error('Error crítico leyendo Bronze: %s', str(e))
         return {'statusCode': 500, 'body': f'Error cargando telemetría: {str(e)}'}
 
-    # Solo registros hasta ahora (producción real)
     df_bronze = df_bronze[df_bronze['timestamp'] <= ahora].copy()
     if len(df_bronze) == 0:
         logger.error('Bronze sin registros hasta %s.', ahora)
@@ -129,36 +153,40 @@ def handler(event, context):
             raise
 
     # -------------------------------------------------------------------------
-    # PASO 4: Cargar Feature Store existente e identificar filas nuevas
-    # -------------------------------------------------------------------------
-    features_log_key = f'models/turbine_{TURBINE_ID}_features_history.parquet'
-    df_store = _load_feature_store(s3_client, features_log_key)
-
-    if df_store is not None:
-        logger.info('Feature Store cargado: %d filas existentes.', len(df_store))
-    else:
-        logger.info('Feature Store no existe todavía. Se creará en esta ejecución.')
-
-    df_new_rows = _get_new_telemetry_rows(df_bronze, df_store)
-    logger.info('Filas nuevas a procesar e incorporar al Feature Store: %d', len(df_new_rows))
-
-    if len(df_new_rows) == 0:
-        logger.info('No hay telemetría nueva desde la última ejecución. Nada que añadir al Feature Store.')
-
-    # -------------------------------------------------------------------------
-    # PASO 5: Calcular features para las filas nuevas y actualizar Feature Store
+    # PASO 4: Pre-calcular ventana de cálculo con domain features
     #
-    # Para calcular features rolling correctamente, necesitamos contexto previo.
-    # Usamos una ventana extendida: las últimas STEPS_7D filas del Bronze como
-    # contexto de cálculo, pero solo añadimos al Feature Store las filas nuevas.
+    # Se hace una sola vez para todas las familias, ya que add_domain_features
+    # es común. Cada familia usará esta misma ventana para sus rolling features.
     # -------------------------------------------------------------------------
-    if len(df_new_rows) > 0:
-        # Contexto de cálculo: últimas STEPS_7D filas del Bronze (incluye filas nuevas)
-        ultimo_ts_bronze = df_bronze['timestamp'].max()
-        primer_ts_new    = df_new_rows['timestamp'].min()
 
-        # Tomamos las STEPS_7D filas anteriores al primer timestamp nuevo como contexto,
-        # más todas las filas nuevas
+    # Determinar el último timestamp ya almacenado en cualquier Feature Store.
+    # Usamos el mínimo entre familias para garantizar que todas están sincronizadas.
+    last_stored_ts_per_family = {}
+    for family in FAMILIES:
+        df_store = _load_parquet_from_s3(s3_client, _feature_store_key(family))
+        last_stored_ts_per_family[family] = _get_last_stored_ts(df_store)
+        if last_stored_ts_per_family[family] is not None:
+            logger.info('Feature Store [%s]: último timestamp = %s (%d filas)',
+                        family, last_stored_ts_per_family[family], len(df_store))
+        else:
+            logger.info('Feature Store [%s]: no existe todavía.', family)
+
+    # El timestamp de corte para nuevas filas es el mínimo entre familias
+    # (si una familia va rezagada, recalculamos desde ahí para todas)
+    stored_ts_values = [ts for ts in last_stored_ts_per_family.values() if ts is not None]
+    global_last_stored_ts = min(stored_ts_values) if stored_ts_values else None
+
+    if global_last_stored_ts is not None:
+        df_new_rows = df_bronze[df_bronze['timestamp'] > global_last_stored_ts].copy()
+    else:
+        df_new_rows = df_bronze.copy()
+
+    logger.info('Filas nuevas a procesar: %d', len(df_new_rows))
+
+    if len(df_new_rows) > 0:
+        primer_ts_new = df_new_rows['timestamp'].min()
+
+        # Contexto rolling: STEPS_7D filas previas al primer timestamp nuevo
         df_contexto_previo = df_bronze[df_bronze['timestamp'] < primer_ts_new].tail(STEPS_7D)
         df_calc_window     = pd.concat([df_contexto_previo, df_new_rows], ignore_index=True)
         df_calc_window     = add_domain_features(df_calc_window)
@@ -167,97 +195,82 @@ def handler(event, context):
                     len(df_calc_window),
                     df_calc_window['timestamp'].min().date(),
                     df_calc_window['timestamp'].max().date())
+    else:
+        df_calc_window = None
+        primer_ts_new  = None
 
-        # Calculamos features rolling para todas las familias sobre la ventana completa.
-        # Construimos un único dict columna→Series para evitar columnas duplicadas,
-        # que ocurren cuando pd.concat recibe partes con nombres solapados.
-        feats_dict = {'timestamp': df_calc_window['timestamp'].values}
+    # -------------------------------------------------------------------------
+    # PASO 5: Por familia — calcular features, actualizar Feature Store
+    #
+    # Estructura de cada t2_features_{family}.parquet (idéntica a T1):
+    #   timestamp | {sensor}__mean_1h | ... | hours_since_last_{family} | hours_since_last_{family}_log
+    #
+    # No incluye targets (hours_to_fault, is_pre_fault) porque T2 está en producción.
+    # El notebook de reentrenamiento mensual une T1 (con targets) + T2 (sin targets)
+    # usando transfer learning o fine-tuning.
+    # -------------------------------------------------------------------------
+    family_stores = {}  # family → df_store actualizado (para inferencia en PASO 6)
 
-        for family, cfg in FAMILIES.items():
+    for family, cfg in FAMILIES.items():
+        logger.info('--- Feature Store [%s] ---', family)
+
+        store_key = _feature_store_key(family)
+        df_store  = _load_parquet_from_s3(s3_client, store_key)
+
+        if df_calc_window is not None:
             fault_times = fault_log[fault_log['family'] == family]['timestamp'].tolist()
 
-            feats_rolling = make_rolling_features(
+            # Rolling features para esta familia
+            feats_rolling   = make_rolling_features(
                 df_calc_window, FAMILY_SENSORS[family], baseline_mean, baseline_p90
             )
             df_family_feats = pd.concat([df_calc_window[['timestamp']], feats_rolling], axis=1)
             df_family_feats = add_temporal_context(df_family_feats, family, fault_times)
 
-            # Cold start: sobreescribir con 9999 cuando T2 no tiene fallos propios
+            # Cold start: T2 sin fallos propios → COLD_START_HOURS
             if not fault_times:
                 df_family_feats[f'hours_since_last_{family}']     = COLD_START_HOURS
                 df_family_feats[f'hours_since_last_{family}_log'] = float(np.log1p(COLD_START_HOURS))
 
-            for col in df_family_feats.columns:
-                if col != 'timestamp' and col not in feats_dict:
-                    feats_dict[col] = df_family_feats[col].values
+            # Filtrar: solo filas nuevas (las del contexto previo sirvieron solo para rolling)
+            df_new_family = df_family_feats[
+                df_family_feats['timestamp'] >= primer_ts_new
+            ].reset_index(drop=True)
 
-        # Añadir columnas de dominio físico de add_domain_features que no sean del bronze raw
-        for col in df_calc_window.columns:
-            if col != 'timestamp' and col not in df_bronze.columns and col not in feats_dict:
-                feats_dict[col] = df_calc_window[col].values
+            # Append al Feature Store de esta familia
+            if df_store is not None:
+                df_updated = pd.concat([df_store, df_new_family], ignore_index=True)
+                df_updated = df_updated.drop_duplicates(subset=['timestamp'], keep='last').reset_index(drop=True)
+            else:
+                df_updated = df_new_family
 
-        # DataFrame garantizado sin columnas duplicadas
-        df_all_feats = pd.DataFrame(feats_dict)
-
-        # Filtrar: solo guardamos las filas que corresponden a timestamps nuevos
-        df_new_features = df_all_feats[
-            df_all_feats['timestamp'] >= primer_ts_new
-        ].reset_index(drop=True)
-
-        logger.info('Features calculadas para %d filas nuevas.', len(df_new_features))
-
-        # Append al Feature Store
-        if df_store is not None:
-            df_updated_store = pd.concat([df_store, df_new_features], ignore_index=True)
+            df_updated = _normalize_dtypes(df_updated)
+            _save_parquet_to_s3(s3_client, df_updated, store_key)
+            logger.info('  Feature Store [%s] actualizado: %d filas totales.', family, len(df_updated))
+            family_stores[family] = df_updated
         else:
-            df_updated_store = df_new_features
-
-        # Forzar tipos consistentes antes de serializar:
-        # el concat de múltiples DataFrames puede dejar columnas como object
-        # cuando hay NaN mezclados con floats. PyArrow rechaza eso.
-        df_updated_store['timestamp'] = pd.to_datetime(df_updated_store['timestamp'])
-        for col in df_updated_store.columns:
-            if col == 'timestamp':
-                continue
-            col_dtype = str(df_updated_store[col].dtype)
-            if col_dtype == 'object':
-                df_updated_store[col] = pd.to_numeric(df_updated_store[col], errors='coerce').astype('float32')
-            elif col_dtype == 'float64':
-                df_updated_store[col] = df_updated_store[col].astype('float32')
-
-        # Guardar Feature Store actualizado en S3 (Parquet por eficiencia)
-        parquet_buffer = io.BytesIO()
-        df_updated_store.to_parquet(parquet_buffer, index=False, engine='pyarrow')
-        s3_client.put_object(
-            Bucket=BUCKET_NAME,
-            Key=features_log_key,
-            Body=parquet_buffer.getvalue()
-        )
-        logger.info('Feature Store actualizado en S3: %d filas totales.', len(df_updated_store))
-    else:
-        # No hay filas nuevas pero sí tenemos el store para inferencia
-        df_updated_store = df_store
+            # Sin filas nuevas: usar el store existente para inferencia
+            family_stores[family] = df_store
+            if df_store is not None:
+                logger.info('  Feature Store [%s]: sin cambios (%d filas).', family, len(df_store))
+            else:
+                logger.warning('  Feature Store [%s]: vacío y sin datos nuevos.', family)
 
     # -------------------------------------------------------------------------
-    # PASO 6: Inferencia — usamos las últimas STEPS_7D filas del Feature Store
+    # PASO 6: Inferencia — cada familia usa las últimas STEPS_7D de su Feature Store
     # -------------------------------------------------------------------------
-    if df_updated_store is None or len(df_updated_store) == 0:
-        logger.error('Feature Store vacío. No es posible realizar inferencia.')
-        return {'statusCode': 500, 'body': 'Feature Store vacío.'}
-
-    df_inference_window = df_updated_store.tail(STEPS_7D).reset_index(drop=True)
-    ultimo_ts = df_inference_window['timestamp'].max()
-    primer_ts = df_inference_window['timestamp'].min()
-    hoy       = pd.Timestamp.now().normalize()
-
-    logger.info('Ventana de inferencia: %s → %s (%d filas)',
-                primer_ts.date(), ultimo_ts.date(), len(df_inference_window))
-
+    ahora_ts  = pd.Timestamp.now()
+    hoy       = ahora_ts.normalize()
     pred_log_key  = 'models/t2_predictions_log.csv'
     results_today = []
 
     for family, cfg in FAMILIES.items():
-        logger.info('--- Subsistema: %s ---', family)
+        logger.info('--- Inferencia [%s] ---', family)
+
+        df_store = family_stores.get(family)
+        if df_store is None or len(df_store) == 0:
+            logger.warning('  Feature Store vacío para %s. Saltando.', family)
+            continue
 
         model_key = f'models/t1_model_{family}.pkl'
         try:
@@ -265,7 +278,7 @@ def handler(event, context):
             pipeline = pickle.loads(response['Body'].read())
         except ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.warning('Modelo no encontrado en S3: %s', model_key)
+                logger.warning('  Modelo no encontrado en S3: %s', model_key)
                 continue
             raise
 
@@ -273,13 +286,17 @@ def handler(event, context):
         calibrator   = pipeline['calibrator']
         feature_cols = pipeline['feature_cols']
 
-        # Rellenar columnas ausentes con 0 (por si feature_cols tiene algo no calculado)
-        for col in feature_cols:
-            if col not in df_inference_window.columns:
-                logger.warning('  Columna ausente en Feature Store, rellenando con 0: %s', col)
-                df_inference_window[col] = 0.0
+        df_window = df_store.tail(STEPS_7D).reset_index(drop=True)
+        ultimo_ts = df_window['timestamp'].max()
 
-        X_hoy = df_inference_window[feature_cols].fillna(0).iloc[[-1]]
+        # Columnas ausentes: pueden ocurrir en las primeras ejecuciones
+        # cuando el Feature Store aún no tiene suficiente historial
+        for col in feature_cols:
+            if col not in df_window.columns:
+                logger.warning('  Columna ausente, rellenando con 0: %s', col)
+                df_window[col] = 0.0
+
+        X_hoy = df_window[feature_cols].fillna(0).iloc[[-1]]
 
         raw_pred = float(np.clip(lgbm.predict(X_hoy)[0], 0, cfg['lead_hours']))
         cal_pred = float(np.clip(calibrator.predict([raw_pred])[0], 0, cfg['lead_hours']))
@@ -304,15 +321,11 @@ def handler(event, context):
     # -------------------------------------------------------------------------
     # PASO 7: Actualizar Log de Predicciones en S3 (append)
     #
-    # Clave de deduplicación: last_data_ts + family.
-    # Esto permite múltiples ejecuciones diarias (o en tiempo real) sin perder
-    # historial. Solo se elimina una fila si ya existe exactamente el mismo
-    # timestamp de datos para la misma familia (rejecución idempotente).
-    #
-    # NUNCA se sobreescribe el historial si hay un error leyendo el log existente.
+    # Deduplicación por last_data_ts + family: idempotente si se ejecuta
+    # varias veces con los mismos datos. Acumula si hay datos nuevos.
+    # NUNCA sobreescribe el historial si hay un error leyendo el log existente.
     # -------------------------------------------------------------------------
-
-    df_results = pd.DataFrame(results_today)
+    df_results      = pd.DataFrame(results_today)
     df_existing_log = None
 
     try:
@@ -323,11 +336,9 @@ def handler(event, context):
         if e.response['Error']['Code'] == 'NoSuchKey':
             logger.info('Log de predicciones no existe aún. Se creará.')
         else:
-            logger.error('Error leyendo log de predicciones: %s', str(e))
+            logger.error('Error S3 leyendo log de predicciones: %s', str(e))
             raise
     except Exception as e:
-        # Error leyendo o parseando el CSV existente: no tocar el archivo,
-        # abortar para no perder historial.
         logger.error('Error parseando log de predicciones existente: %s', str(e))
         raise
 
