@@ -144,6 +144,7 @@ def handler(event, context):
     try:
         response = s3_client.get_object(Bucket=BUCKET_NAME, Key=fault_log_key)
         fault_log = pd.read_csv(io.BytesIO(response['Body'].read()), parse_dates=['timestamp'])
+        # El fault log ya está filtrado por fecha — lo actualiza el reentrenamiento mensual (PASO 0)
         logger.info('Fault log de T2 cargado: %d registros.', len(fault_log))
     except ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchKey':
@@ -272,15 +273,25 @@ def handler(event, context):
             logger.warning('  Feature Store vacío para %s. Saltando.', family)
             continue
 
-        model_key = f'models/t1_model_{family}.pkl'
+        # Buscar primero modelo propio de T2 (reentrenado), si no existe usar T1 como fallback
+        model_key = f'models/t2_model_{family}.pkl'
         try:
             response = s3_client.get_object(Bucket=BUCKET_NAME, Key=model_key)
             pipeline = pickle.loads(response['Body'].read())
+            logger.info('  Usando modelo T2 propio: %s', model_key)
         except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.warning('  Modelo no encontrado en S3: %s', model_key)
-                continue
-            raise
+            if e.response['Error']['Code'] != 'NoSuchKey':
+                raise
+            model_key = f'models/t1_model_{family}.pkl'
+            logger.info('  Modelo T2 no existe aún, usando fallback T1: %s', model_key)
+            try:
+                response = s3_client.get_object(Bucket=BUCKET_NAME, Key=model_key)
+                pipeline = pickle.loads(response['Body'].read())
+            except ClientError as e2:
+                if e2.response['Error']['Code'] == 'NoSuchKey':
+                    logger.warning('  Modelo T1 tampoco encontrado: %s', model_key)
+                    continue
+                raise
 
         lgbm         = pipeline['lgbm']
         calibrator   = pipeline['calibrator']

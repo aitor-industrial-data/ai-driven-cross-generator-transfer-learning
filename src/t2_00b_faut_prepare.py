@@ -32,44 +32,56 @@ print(f"Archivos: {len(all_files)}")
 # 4. LEER CSV
 status_df = spark.read.option("header", True).option("comment", "#").csv(all_files)
 
-# 5. SUMAR 8 AÑOS
+# 5. SUMAR 8 SOLO AL AÑO
+# Extraer año, sumar 8, reconstruir el string completo
 status_df = status_df.withColumn(
     "Timestamp start",
-    F.add_months(F.try_to_timestamp("Timestamp start"), 96)
+    F.when(
+        F.col("Timestamp start") == "-",
+        F.col("Timestamp start")
+    ).otherwise(
+        F.concat(
+            (F.substring("Timestamp start", 1, 4).cast("int") + 8).cast("string"),
+            F.substring("Timestamp start", 5, 100)
+        )
+    )
 ).withColumn(
     "Timestamp end",
-    F.add_months(F.try_to_timestamp("Timestamp end"), 96)
+    F.when(
+        F.col("Timestamp end") == "-",
+        F.col("Timestamp end")
+    ).otherwise(
+        F.concat(
+            (F.substring("Timestamp end", 1, 4).cast("int") + 8).cast("string"),
+            F.substring("Timestamp end", 5, 100)
+        )
+    )
 )
 
-# 6. AÑADIR COLUMNA AÑO-MES PARA FRACCIONAR
-status_df = status_df.withColumn("year_month", F.date_format("Timestamp start", "yyyy-MM"))
+# 6. ORDENAR
+status_df = status_df.withColumn(
+    "_sort_ts",
+    F.try_to_timestamp(F.col("Timestamp start"))
+).orderBy("_sort_ts").drop("_sort_ts")
 
-# 7. OBTENER LISTA DE MESES ÚNICOS
-months = [row.year_month for row in status_df.select("year_month").distinct().collect()]
-months.sort()
-
-# 8. CREAR DIRECTORIO DE SALIDA
-output_dir = os.path.join(PROJECT_ROOT, "data", "silver", "turbine_2_status_by_month")
+# 7. CREAR DIRECTORIO DE SALIDA
+output_dir = os.path.join(PROJECT_ROOT, "data", "silver")
 os.makedirs(output_dir, exist_ok=True)
 
-# 9. GUARDAR UN CSV POR MES
-for month in months:
-    month_df = status_df.filter(F.col("year_month") == month).drop("year_month")
-    month_df = month_df.orderBy("Timestamp start")
-    
-    output_file = os.path.join(output_dir, f"turbine_2_status_{month}.csv")
-    temp_dir = os.path.join(output_dir, f"temp_{month}")
-    
-    month_df.coalesce(1).write.mode("overwrite").option("header", "true").csv(temp_dir)
-    
-    # Renombrar el archivo part-00000
-    for f in os.listdir(temp_dir):
-        if f.startswith("part-") and f.endswith(".csv"):
-            shutil.move(os.path.join(temp_dir, f), output_file)
-            break
-    shutil.rmtree(temp_dir)
-    
-    count = month_df.count()
-    print(f"Guardado: {output_file} ({count} registros)")
+output_file = os.path.join(output_dir, "turbine_2_status_2026_2030.csv")
+temp_dir = os.path.join(output_dir, "temp_turbine_2")
 
-print(f"\nListo. Archivos guardados en: {output_dir}")
+# 8. GUARDAR EN UN SOLO CSV
+status_df.coalesce(1).write.mode("overwrite").option("header", "true").csv(temp_dir)
+
+# 9. RENOMBRAR EL ARCHIVO part-00000 AL NOMBRE FINAL
+for f in os.listdir(temp_dir):
+    if f.startswith("part-") and f.endswith(".csv"):
+        shutil.move(os.path.join(temp_dir, f), output_file)
+        break
+
+shutil.rmtree(temp_dir)
+
+count = status_df.count()
+print(f"\nGuardado: {output_file} ({count} registros)")
+print(f"Listo. Archivo único generado en: {output_file}")
