@@ -749,4 +749,16 @@ def handler(event, context):
 if __name__ == '__main__':
     print('🚀 Reentrenamiento mensual local...')
     handler({}, None)
-##
+
+
+#Prueba manual
+"""aws ecs run-task \
+  --cluster sunsaver-cluster \
+  --task-definition t2-retrain:1 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[subnet-0aaf5f3d23ffcfd2f],assignPublicIp=ENABLED}" \
+  --region eu-south-2"""
+
+"""aws logs tail /ecs/t2-retrain \
+  --follow \
+  --region eu-south-2"""
