@@ -16,5 +16,9 @@ COPY src/shared/ ${LAMBDA_TASK_ROOT}/shared/
 # Copiamos el script principal de inferencia diaria
 COPY src/t2_daily_inference_serverless.py ${LAMBDA_TASK_ROOT}
 
-# Configuración del Handler que invocará AWS Lambda al activarse
+# Copiamos el script de reentrenamiento mensual
+COPY src/t2_monthly_retrain.py ${LAMBDA_TASK_ROOT}
+
+# Handler por defecto: inferencia diaria
+# (el Lambda mensual sobreescribe esto en su propia configuración)
 CMD [ "t2_daily_inference_serverless.handler" ]

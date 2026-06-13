@@ -49,10 +49,6 @@ FAMILIES = {
 TRAIN_RATIO = 0.60
 VAL_RATIO   = 0.80
 
-# Mínimo de eventos en el test set de T2 para que la comparación sea válida.
-# Si hay menos, se fuerza T1+T2 como ganador (más datos = más robusto).
-MIN_TEST_EVENTS_FOR_COMPARISON = 5
-
 # Período de exclusión post-fallo: filas dentro de este margen
 # después de un fallo se descartan (sensores en transición post-reparación)
 POST_FAULT_EXCLUSION_H = 24
@@ -304,7 +300,8 @@ def _temporal_split(df: pd.DataFrame) -> tuple:
 
 def train_and_evaluate(df: pd.DataFrame, family: str, cfg: dict,
                        source_label: str,
-                       df_t2_labeled: pd.DataFrame | None = None) -> dict | None:
+                       df_t2_labeled: pd.DataFrame | None = None,
+                       test_t2: pd.DataFrame | None = None) -> dict | None:
     """
     Entrena LGBMRegressor + IsotonicRegression sobre df.
     Devuelve dict con pipeline y metricas, o None si no hay datos suficientes.
@@ -313,6 +310,9 @@ def train_and_evaluate(df: pd.DataFrame, family: str, cfg: dict,
     - T2_only: split directo sobre df.
     - T1+T2:   split por separado en T1 y T2, luego concatena cada tramo.
       Evita que el gap de 4 anos entre fuentes distorsione el corte temporal.
+    
+    Si test_t2 se proporciona, se usa directamente como test set (para evaluación
+    consistente entre versiones sobre el mismo período de T2).
     """
     lead_hours = cfg['lead_hours']
     alert_h    = cfg['alert_h']
@@ -326,30 +326,31 @@ def train_and_evaluate(df: pd.DataFrame, family: str, cfg: dict,
 
     df = df.sort_values('timestamp').reset_index(drop=True)
 
+    # test siempre es el test_t2 fijo — evaluación consistente entre versiones
     if source_label == 'T1+T2' and df_t2_labeled is not None:
         t1_cutoff = pd.Timestamp('2023-01-01')
         df_t1_src = df[df['timestamp'] < t1_cutoff].copy()
         df_t2_src = df[df['timestamp'] >= t1_cutoff].copy()
 
         if len(df_t1_src) > 0:
-            train_t1, val_t1, test_t1 = _temporal_split(df_t1_src)
+            train_t1, val_t1, _ = _temporal_split(df_t1_src)
         else:
-            train_t1 = val_t1 = test_t1 = pd.DataFrame(columns=df.columns)
+            train_t1 = val_t1 = pd.DataFrame(columns=df.columns)
 
         if len(df_t2_src) > 0:
-            train_t2, val_t2, test_t2 = _temporal_split(df_t2_src)
+            train_t2, val_t2, _ = _temporal_split(df_t2_src)
         else:
-            train_t2 = val_t2 = test_t2 = pd.DataFrame(columns=df.columns)
+            train_t2 = val_t2 = pd.DataFrame(columns=df.columns)
 
         train = pd.concat([train_t1, train_t2], ignore_index=True)
         val   = pd.concat([val_t1,   val_t2],   ignore_index=True)
-        test  = pd.concat([test_t1,  test_t2],  ignore_index=True)
-
-        logger.info('  [T1+T2] T1 train/val/test: %d/%d/%d | T2 train/val/test: %d/%d/%d',
-                    len(train_t1), len(val_t1), len(test_t1),
-                    len(train_t2), len(val_t2), len(test_t2))
+        logger.info('  [T1+T2] T1 train/val: %d/%d | T2 train/val: %d/%d',
+                    len(train_t1), len(val_t1), len(train_t2), len(val_t2))
     else:
-        train, val, test = _temporal_split(df)
+        train, val, _ = _temporal_split(df)
+        logger.info('  [T2_only] split temporal para train/val')
+
+    test = test_t2.copy()
 
     train_pos = train[train[target_col].astype(bool)]
     val_pos   = val[val[target_col].astype(bool)]
@@ -383,18 +384,20 @@ def train_and_evaluate(df: pd.DataFrame, family: str, cfg: dict,
     calibrator.fit(pred_val_raw, y_val)
 
     # --- Evaluación sobre test completo (pos + neg) ---
-    pred_test_raw = np.clip(model.predict(test[feat_cols].fillna(0)), 0, lead_hours)
+    # Asegurar que test solo tenga columnas que existen en el modelo
+    test_feat_cols = [c for c in feat_cols if c in test.columns]
+    pred_test_raw = np.clip(model.predict(test[test_feat_cols].fillna(0)), 0, lead_hours)
     pred_test_cal = np.clip(calibrator.predict(pred_test_raw), 0, lead_hours)
 
     mae_raw = float(mean_absolute_error(
         test_pos[hours_col].values,
-        np.clip(model.predict(test_pos[feat_cols].fillna(0)), 0, lead_hours)
+        np.clip(model.predict(test_pos[test_feat_cols].fillna(0)), 0, lead_hours)
     )) if len(test_pos) > 0 else None
 
     mae_cal = float(mean_absolute_error(
         test_pos[hours_col].values,
         np.clip(calibrator.predict(
-            np.clip(model.predict(test_pos[feat_cols].fillna(0)), 0, lead_hours)
+            np.clip(model.predict(test_pos[test_feat_cols].fillna(0)), 0, lead_hours)
         ), 0, lead_hours)
     )) if len(test_pos) > 0 else None
 
@@ -410,9 +413,7 @@ def train_and_evaluate(df: pd.DataFrame, family: str, cfg: dict,
     # --- Event Recall ---
     ev = _evaluate_by_event(test, pred_test_cal, family, alert_h, lead_hours)
 
-    # --- F1 entre Event Recall y Precision (métrica de selección del ganador) ---
-    # Combina detección de fallos reales (Event Recall) con tasa de falsas alarmas (Precision).
-    # Un modelo con Event Recall=1.0 pero Precision=0.05 genera demasiado ruido operativo.
+    # --- F1 entre Event Recall y Precision ---
     er  = ev['event_recall']
     f1_ep = round(2 * er * precision / (er + precision), 4) if (er + precision) > 0 else 0.0
 
@@ -444,8 +445,9 @@ def train_and_evaluate(df: pd.DataFrame, family: str, cfg: dict,
         'mae_cal_h':       round(mae_cal, 1) if mae_cal else None,
         'source':          source_label,
         'n_estimators':    int(model.best_iteration_) if hasattr(model, 'best_iteration_') else 1000,
-        'test_start':      str(test['timestamp'].min().date()),
-        'test_end':        str(test['timestamp'].max().date()),
+        'test_t2_start':   str(test['timestamp'].min().date()),
+        'test_t2_end':     str(test['timestamp'].max().date()),
+        'test_t2_rows':    len(test),  # ← Añadido para que el handler lo use
     }
 
 
@@ -609,20 +611,13 @@ def handler(event, context):
             logger.warning('Ninguna versión entrenada para %s.', family)
             continue
 
-        # Eventos en test set de T2 (usar result_t2_only si existe, si no el único disponible)
-        ref = result_t2_only if result_t2_only is not None else candidates[0]
-        n_test_events = ref['events_total']
-
+        # Selección del ganador por F1(Event Recall, Precision) sobre test_t2.
+        # Ambas versiones se evaluaron sobre el mismo test_t2 → comparación justa.
+        # Empate → T1+T2 por más datos de entrenamiento.
         if len(candidates) == 1:
             winner = candidates[0]
             selection_reason = 'única versión disponible'
-        elif n_test_events < MIN_TEST_EVENTS_FOR_COMPARISON:
-            # Pocos eventos: forzar T1+T2 si existe, si no el único disponible
-            winner = result_t1_t2 if result_t1_t2 is not None else result_t2_only
-            selection_reason = f'test insuficiente ({n_test_events} eventos < {MIN_TEST_EVENTS_FOR_COMPARISON}) → forzado T1+T2'
         else:
-            # Comparación válida: gana el mayor F1(Event Recall, Precision)
-            # Empate en F1 → T1+T2 por más datos
             best_f1 = max(r['f1_ep'] for r in candidates)
             winners_by_f1 = [r for r in candidates if r['f1_ep'] == best_f1]
             if len(winners_by_f1) > 1:

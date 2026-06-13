@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'src/t2_daily_inference_serverless.py'
+      - 'src/t2_monthly_retrain.py'
       - 'src/shared/**'
       - 'Dockerfile'
       - 'requirements.txt'
@@ -14,15 +15,18 @@ permissions:
   contents: read
 
 env:
-  AWS_REGION:  eu-south-2
-  ECR_REPO:    t2-inference-lambda
-  LAMBDA_NAME: t2-inference-lambda
-  AWS_ACCOUNT: 610140802215
+  AWS_REGION:          eu-south-2
+  ECR_REPO:            t2-inference-lambda
+  LAMBDA_DAILY:        t2-inference-lambda
+  LAMBDA_MONTHLY:      t2-monthly-retrain-lambda
+  AWS_ACCOUNT:         610140802215
 
 jobs:
-  deploy:
-    name: Build & Deploy
+  build-and-push:
+    name: Build & Push imagen ECR
     runs-on: ubuntu-latest
+    outputs:
+      image-uri: ${{ steps.digest.outputs.uri }}
 
     steps:
       - name: Checkout código
@@ -63,14 +67,52 @@ jobs:
             --output text)
           echo "uri=${IMAGE_URI}@${DIGEST}" >> $GITHUB_OUTPUT
 
-      - name: Actualizar Lambda con digest
+  deploy-daily:
+    name: Deploy Lambda diaria
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Configurar credenciales AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::610140802215:role/github-t2-lambda-role
+          aws-region:     ${{ env.AWS_REGION }}
+          audience:       sts.amazonaws.com
+
+      - name: Actualizar Lambda diaria con digest
         run: |
           aws lambda update-function-code \
-            --function-name ${{ env.LAMBDA_NAME }} \
-            --image-uri ${{ steps.digest.outputs.uri }}
+            --function-name ${{ env.LAMBDA_DAILY }} \
+            --image-uri ${{ needs.build-and-push.outputs.image-uri }}
 
-      - name: Esperar a que Lambda esté lista
+      - name: Esperar a que Lambda diaria esté lista
         run: |
           aws lambda wait function-updated \
-            --function-name ${{ env.LAMBDA_NAME }}
-          echo "✅ Lambda actualizada: ${{ steps.digest.outputs.uri }}"
+            --function-name ${{ env.LAMBDA_DAILY }}
+          echo "✅ Lambda diaria actualizada: ${{ needs.build-and-push.outputs.image-uri }}"
+
+  deploy-monthly:
+    name: Deploy Lambda mensual
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Configurar credenciales AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::610140802215:role/github-t2-lambda-role
+          aws-region:     ${{ env.AWS_REGION }}
+          audience:       sts.amazonaws.com
+
+      - name: Actualizar Lambda mensual con digest
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_MONTHLY }} \
+            --image-uri ${{ needs.build-and-push.outputs.image-uri }}
+
+      - name: Esperar a que Lambda mensual esté lista
+        run: |
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_MONTHLY }}
+          echo "✅ Lambda mensual actualizada: ${{ needs.build-and-push.outputs.image-uri }}"
