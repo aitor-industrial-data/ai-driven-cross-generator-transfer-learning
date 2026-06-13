@@ -749,3 +749,5 @@ def handler(event, context):
 if __name__ == '__main__':
     print('🚀 Reentrenamiento mensual local...')
     handler({}, None)
+
+#prueba
