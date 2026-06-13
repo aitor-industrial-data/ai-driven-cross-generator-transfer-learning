@@ -1,0 +1,113 @@
+name: Deploy t2-retrain ECS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/t2_monthly_retrain.py'
+      - 'Dockerfile.retrain'
+      - 'requirements.txt'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION:   eu-south-2
+  ECR_REPO:     t2-retrain
+  TASK_FAMILY:  t2-retrain
+  AWS_ACCOUNT:  610140802215
+
+jobs:
+  deploy-retrain:
+    name: Build & Deploy retrain ECS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configurar credenciales AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::610140802215:role/github-t2-lambda-role
+          aws-region:     ${{ env.AWS_REGION }}
+          audience:       sts.amazonaws.com
+
+      - name: Login en Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build y push a ECR
+        env:
+          IMAGE_URI: ${{ env.AWS_ACCOUNT }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance=false \
+            --push \
+            -f Dockerfile.retrain \
+            -t $IMAGE_URI:latest .
+
+      - name: Resolver digest exacto
+        id: digest
+        env:
+          IMAGE_URI: ${{ env.AWS_ACCOUNT }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPO }}
+        run: |
+          DIGEST=$(aws ecr describe-images \
+            --repository-name ${{ env.ECR_REPO }} \
+            --image-ids imageTag=latest \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)
+          echo "uri=${IMAGE_URI}@${DIGEST}" >> $GITHUB_OUTPUT
+
+      - name: Registrar nueva Task Definition con digest
+        id: taskdef
+        env:
+          IMAGE_URI: ${{ steps.digest.outputs.uri }}
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition ${{ env.TASK_FAMILY }} \
+            --query 'taskDefinition')
+
+          NEW_TASK_DEF=$(echo $TASK_DEF | python3 -c "
+          import json, sys
+          td = json.load(sys.stdin)
+          td['containerDefinitions'][0]['image'] = '$IMAGE_URI'
+          for key in ['taskDefinitionArn','revision','status','requiresAttributes',
+                      'compatibilities','registeredAt','registeredBy']:
+              td.pop(key, None)
+          print(json.dumps(td))
+          ")
+
+          REVISION=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --query 'taskDefinition.revision' \
+            --output text)
+          echo "revision=${REVISION}" >> $GITHUB_OUTPUT
+          echo "✅ Task Definition registrada: ${{ env.TASK_FAMILY }}:${REVISION}"
+
+      - name: Actualizar EventBridge target con nueva revisión
+        run: |
+          aws events put-targets \
+            --rule t2-monthly-retrain-schedule \
+            --targets '[{
+              "Id": "1",
+              "Arn": "arn:aws:ecs:eu-south-2:610140802215:cluster/sunsaver-cluster",
+              "RoleArn": "arn:aws:iam::610140802215:role/t2-retrain-eventbridge-role",
+              "EcsParameters": {
+                "TaskDefinitionArn": "arn:aws:ecs:eu-south-2:610140802215:task-definition/t2-retrain:${{ steps.taskdef.outputs.revision }}",
+                "TaskCount": 1,
+                "LaunchType": "FARGATE",
+                "NetworkConfiguration": {
+                  "awsvpcConfiguration": {
+                    "Subnets": ["subnet-0aaf5f3d23ffcfd2f"],
+                    "AssignPublicIp": "ENABLED"
+                  }
+                }
+              }
+            }]' \
+            --region ${{ env.AWS_REGION }}
+          echo "✅ EventBridge actualizado a revisión ${{ steps.taskdef.outputs.revision }}"
