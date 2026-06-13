@@ -1,6 +1,5 @@
 FROM public.ecr.aws/docker/library/python:3.12-slim
 
-# libgomp necesaria para LightGBM
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -8,8 +7,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Solo el script de retrain — sin shared/ (no lo usa)
 COPY src/t2_monthly_retrain.py .
 
-# Entrypoint directo: ejecuta handler({}, None) al arrancar el contenedor
 CMD ["python", "-c", "from t2_monthly_retrain import handler; handler({}, None)"]
