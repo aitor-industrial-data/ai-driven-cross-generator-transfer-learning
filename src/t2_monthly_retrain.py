@@ -766,3 +766,5 @@ if __name__ == '__main__':
 """aws logs tail /ecs/t2-retrain \
   --follow \
   --region eu-south-2"""
+
+#prueba
