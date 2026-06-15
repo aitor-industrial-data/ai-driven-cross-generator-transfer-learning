@@ -656,11 +656,13 @@ def handler(event, context):
             'test_t2_end':       winner['test_t2_end'],
             'test_t2_rows':      winner['test_t2_rows'],
             'candidates': {r['source']: {
-                'event_recall': r['event_recall'],
-                'precision':    r['precision'],
-                'recall':       r['recall'],
-                'f1_ep':        r['f1_ep'],
-                'mae_cal_h':    r['mae_cal_h'],
+                'event_recall':    r['event_recall'],
+                'events_detected': r['events_detected'],
+                'events_total':    r['events_total'],
+                'precision':       r['precision'],
+                'recall':          r['recall'],
+                'f1_ep':           r['f1_ep'],
+                'mae_cal_h':       r['mae_cal_h'],
             } for r in candidates},
             'elapsed_s': elapsed,
         }
@@ -700,11 +702,13 @@ def handler(event, context):
         # Añadir métricas de cada candidato como columnas planas
         for src, metrics in res['candidates'].items():
             safe = src.replace('+', '_')
-            row_base[f'er_{safe}']        = metrics['event_recall']
-            row_base[f'precision_{safe}'] = metrics['precision']
-            row_base[f'recall_{safe}']    = metrics['recall']
-            row_base[f'f1_ep_{safe}']     = metrics['f1_ep']
-            row_base[f'mae_{safe}']       = metrics['mae_cal_h']
+            row_base[f'er_{safe}']              = metrics['event_recall']
+            row_base[f'detected_{safe}']        = metrics['events_detected']
+            row_base[f'total_{safe}']           = metrics['events_total']
+            row_base[f'precision_{safe}']       = metrics['precision']
+            row_base[f'recall_{safe}']          = metrics['recall']
+            row_base[f'f1_ep_{safe}']           = metrics['f1_ep']
+            row_base[f'mae_{safe}']             = metrics['mae_cal_h']
         log_rows.append(row_base)
 
     df_new_log = pd.DataFrame(log_rows)

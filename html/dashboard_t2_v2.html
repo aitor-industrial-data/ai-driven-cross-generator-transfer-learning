@@ -70,15 +70,7 @@ header {
   display: flex; align-items: center; justify-content: center;
   font-size: .9rem;
 }
-nav { display: flex; gap: .25rem; }
-nav a {
-  color: var(--text2); text-decoration: none;
-  font-size: .8rem; font-weight: 600; letter-spacing: .06em;
-  text-transform: uppercase;
-  padding: .4rem .8rem; border-radius: var(--radius);
-  transition: all .2s;
-}
-nav a:hover, nav a.active { background: var(--bg3); color: var(--text); }
+/* generic nav reset — overridden by #nav-main and #nav-sub rules */
 .status-badge {
   display: flex; align-items: center; gap: .5rem;
   font-size: .75rem; color: var(--text2);
@@ -324,47 +316,72 @@ footer {
 .section-content { display: none; }
 .section-content.active { display: block; }
 
-/* ── TWO-TIER NAV ── */
-header {
-  height: auto !important;
-  flex-wrap: wrap;
-  gap: 0;
-  padding: 0 !important;
+/* ── THREE-ROW HEADER ── */
+
+/* Fila 1: logo + status */
+#header-top {
+  width: 100%;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 2rem;
+  height: 48px;
+  border-bottom: 1px solid var(--border);
 }
-.logo { padding: 0 2rem; height: 52px; }
+.logo { display: flex; align-items: center; }
+.status-badge { padding: 0; }
+
+/* Fila 2: pestañas principales a ancho completo */
 #nav-main {
-  display: flex; gap: .25rem;
-  height: 52px; align-items: center;
-  padding: 0 .5rem;
-  border-left: 1px solid var(--border);
+  width: 100%;
+  display: flex;
+  gap: .75rem;
+  padding: .6rem 2rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
 }
 #nav-main .nav-main-btn {
+  flex: 1;
+  text-align: center;
   color: var(--text2); text-decoration: none;
-  font-size: .82rem; font-weight: 700; letter-spacing: .04em;
-  padding: .45rem 1rem; border-radius: var(--radius);
+  font-size: .9rem; font-weight: 700; letter-spacing: .04em;
+  padding: .6rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg2);
   transition: all .2s; white-space: nowrap;
+  position: relative;
 }
-#nav-main .nav-main-btn:hover { background: var(--bg3); color: var(--text); }
-#nav-main .nav-main-btn.active { background: var(--accent); color: #fff; }
+#nav-main .nav-main-btn:hover {
+  background: var(--bg3);
+  color: var(--text);
+  border-color: var(--border2);
+}
+#nav-main .nav-main-btn.active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 16px rgba(88,166,255,.25);
+}
+#nav-main .nav-main-btn.active::after { display: none; }
+
+/* Fila 3: sub-pestañas */
 #nav-sub {
   width: 100%;
   background: var(--bg2);
-  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center;
   padding: 0 2rem; gap: .15rem;
-  min-height: 38px;
+  min-height: 36px;
 }
 #nav-sub a {
   color: var(--text3); text-decoration: none;
-  font-size: .75rem; font-weight: 600; letter-spacing: .06em;
+  font-size: .72rem; font-weight: 600; letter-spacing: .07em;
   text-transform: uppercase;
-  padding: .35rem .7rem; border-radius: var(--radius);
+  padding: .3rem .7rem; border-radius: var(--radius);
   transition: all .2s; cursor: pointer;
 }
 #nav-sub a:hover { color: var(--text); background: var(--bg3); }
 #nav-sub a.active { color: var(--text); background: var(--bg3); }
-.status-badge { padding: 0 2rem; height: 52px; }
 
 /* ── MODULE WRAPPER ── */
 .module { display: none; }
@@ -665,34 +682,35 @@ header {
 <body>
 
 <header>
-  <div class="logo">
-    <div class="logo-icon">⚡</div>
-    <span>Kelmarsh Wind Farm</span>
+  <!-- Fila 1: logo + sistema activo -->
+  <div id="header-top">
+    <div class="logo">
+      <div class="logo-icon">⚡</div>
+      <span>Kelmarsh Wind Farm</span>
+    </div>
+    <div class="status-badge">
+      <div class="dot"></div>
+      Sistema activo
+    </div>
   </div>
-  <!-- Tier 1: módulos principales -->
+  <!-- Fila 2: pestañas principales a ancho completo -->
   <nav id="nav-main">
-    <a href="#t1" class="active nav-main-btn" onclick="showModule('t1',this)">📊 Entrenamiento T1</a>
-    <a href="#t2" class="nav-main-btn" onclick="showModule('t2',this)">⚡ Turbina T2 en Producción</a>
+    <a href="#t1" class="active nav-main-btn" onclick="showModule('t1',this)">ENTRENAMIENTO</a>
+    <a href="#t2" class="nav-main-btn" onclick="showModule('t2',this)">PRODUCCIÓN</a>
   </nav>
-  <!-- Tier 2: sub-pestañas (cambian según el módulo activo) -->
+  <!-- Fila 3: sub-pestañas -->
   <nav id="nav-sub">
-    <!-- T1 sub-nav -->
     <span id="subnav-t1">
       <a class="active" onclick="showSection('resumen',this,'t1')">Resumen</a>
       <a onclick="showSection('modelos',this,'t1')">Modelos</a>
       <a onclick="showSection('simulador',this,'t1')">Simulador</a>
       <a onclick="showSection('metodologia',this,'t1')">Metodología</a>
     </span>
-    <!-- T2 sub-nav -->
     <span id="subnav-t2" style="display:none">
-      <a onclick="showSection('operario',this,'t2')">🚨 Alertas en Tiempo Real</a>
-      <a onclick="showSection('reentreno',this,'t2')">📈 Reentreno Mensual</a>
+      <a onclick="showSection('operario',this,'t2')">Alertas en Tiempo Real</a>
+      <a onclick="showSection('reentreno',this,'t2')">Reentreno Mensual</a>
     </span>
   </nav>
-  <div class="status-badge">
-    <div class="dot"></div>
-    Sistema activo
-  </div>
 </header>
 
 <main>
@@ -1723,7 +1741,7 @@ function activateSection(id, mod) {
 const OP_S3_URL = 'https://ai-driven-cross-generator-transfer-learning.s3.eu-south-2.amazonaws.com/models/t2_predictions_log.csv';
 
 const OP_FAM_META = {
-  yaw_cable:   { label:'Yaw / Cable',       color:'#378ADD', alert_h:48,  actions:{ critical:'Inspección inmediata del sistema de guiñada y cables. Planificar parada controlada urgentemente.', warning:'Programar revisión de cables de guiñada.', ok:'Monitorizar. Sin acción inmediata.' } },
+  yaw_cable:   { label:'Yaw / Cable',       color:'#378ADD', alert_h:48,  actions:{ critical:'Inspección inmediata del sistema de guiñada y cables. Planificar parada controlada en <24h.', warning:'Programar revisión de cables de guiñada.', ok:'Monitorizar. Sin acción inmediata.' } },
   generator:   { label:'Generador',          color:'#D85A30', alert_h:72,  actions:{ critical:'Revisión urgente de rodamientos y temperatura. Contactar equipo de mantenimiento.', warning:'Programar inspección del generador esta semana.', ok:'Sin acción requerida.' } },
   brake_hydro: { label:'Freno / Hidráulico', color:'#BA7517', alert_h:72,  actions:{ critical:'Verificar presión hidráulica y estado del freno. No diferir mantenimiento.', warning:'Revisar niveles de aceite y presión.', ok:'Sin acción requerida.' } },
   pitch_bat:   { label:'Pitch / Baterías',   color:'#1D9E75', alert_h:168, actions:{ critical:'Comprobar estado de baterías y sistema de pitch. Riesgo de descontrol de pala.', warning:'Programar test de baterías de pitch esta semana.', ok:'Sin acción requerida.' } },
@@ -2019,14 +2037,48 @@ let retrainHistChart = null;
 let retrainInited = false;
 
 function parseRetrainCSV(text) {
+  // Parse respetando comillas (campos con comas dentro)
+  function parseLine(line) {
+    const result = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; }
+      else if (c === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
+      else cur += c;
+    }
+    result.push(cur.trim());
+    return result;
+  }
   const lines = text.trim().split('\n');
-  const headers = lines[0].split(',').map(h => h.trim());
+  const headers = parseLine(lines[0]);
   return lines.slice(1).filter(l => l.trim()).map(line => {
-    const vals = line.split(',');
+    const vals = parseLine(line);
     const row = {};
-    headers.forEach((h, i) => row[h] = (vals[i] || '').trim());
+    headers.forEach((h, i) => row[h] = (vals[i] || '').replace(/^"|"$/g, '').trim());
     return row;
   });
+}
+
+function normalizeRetrainRow(r) {
+  // Mapea columnas del CSV real a los nombres que usa el JS
+  const retrained_at = r.retrained_at || r.retrain_date || '';
+  const month = retrained_at.slice(0, 7); // "2026-06"
+  return {
+    ...r,
+    retrain_date:  retrained_at.slice(0, 10),
+    retrain_month: month,
+    er_winner:              r.er_winner     || r.event_recall     || '',
+    events_detected_winner: r.events_detected_winner || r.events_detected || '',
+    mae_cal_winner:         r.mae_cal_winner || r.mae_cal_h        || '',
+    er_t2_only:             r.er_t2_only    || r.er_T2_only       || '',
+    er_t1_plus_t2:          r.er_t1_plus_t2 || r.er_T1_T2        || '',
+    precision_t2_only:      r.precision_t2_only  || r.precision_T2_only || '',
+    precision_t1_plus_t2:   r.precision_t1_plus_t2 || r.precision_T1_T2 || '',
+    mae_cal_t2_only:        r.mae_cal_t2_only || r.mae_T2_only    || '',
+    mae_cal_t1_plus_t2:     r.mae_cal_t1_plus_t2 || r.mae_T1_T2  || '',
+    notes:                  r.notes || r.selection_reason         || '',
+  };
 }
 
 async function initRetrainSection() {
@@ -2037,10 +2089,16 @@ async function initRetrainSection() {
     const r = await fetch(RETRAIN_S3_URL, { cache: 'no-cache' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const text = await r.text();
-    retrainRows = parseRetrainCSV(text);
+    retrainRows = parseRetrainCSV(text).map(normalizeRetrainRow);
   } catch(e) {
-    // Intentar con el CSV de muestra embebido (si existe en el futuro)
-    retrainRows = [];
+    console.warn('Retrain CSV fetch failed, using embedded data:', e.message);
+    // Fallback con los datos reales del último reentreno
+    const csvFallback = `retrained_at,family,winner,selection_reason,event_recall,events_detected,events_total,precision,recall,f1_ep,mae_cal_h,n_estimators,test_t2_start,test_t2_end,test_t2_rows,elapsed_s,er_T2_only,precision_T2_only,recall_T2_only,f1_ep_T2_only,mae_T2_only,er_T1_T2,precision_T1_T2,recall_T1_T2,f1_ep_T1_T2,mae_T1_T2
+2026-06-15T08:04:28.789049,yaw_cable,T1+T2,"mejor F1(ER,P)=0.384 (ER=1.000, P=0.238)",1.0,2,2,0.2379,0.992,0.3844,19.4,13,2026-05-12,2026-06-14,4605,12.5,0.0,0.0,0.0,0.0,19.8,1.0,0.2379,0.992,0.3844,19.4
+2026-06-15T08:04:28.789049,generator,T1+T2,"mejor F1(ER,P)=0.355 (ER=1.000, P=0.216)",1.0,1,1,0.2156,1.0,0.3547,31.8,1,2026-05-13,2026-06-15,4523,28.9,1.0,0.1685,1.0,0.2884,61.6,1.0,0.2156,1.0,0.3547,31.8
+2026-06-15T08:04:28.789049,brake_hydro,T1+T2,única versión disponible,1.0,1,1,0.1347,0.4987,0.2374,22.9,11,2026-05-13,2026-06-15,4491,9.7,,,,,,1.0,0.1347,0.4987,0.2374,22.9
+2026-06-15T08:04:28.789049,pitch_bat,T1+T2,"mejor F1(ER,P)=0.313 (ER=1.000, P=0.185)",1.0,1,1,0.1853,0.5563,0.3127,68.3,28,2026-05-12,2026-06-15,4664,16.3,0.0,0.0,0.0,0.0,147.4,1.0,0.1853,0.5563,0.3127,68.3`;
+    retrainRows = parseRetrainCSV(csvFallback).map(normalizeRetrainRow);
   }
 
   renderRetrainUI();
