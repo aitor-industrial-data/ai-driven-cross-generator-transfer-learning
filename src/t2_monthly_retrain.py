@@ -758,7 +758,7 @@ if __name__ == '__main__':
 #Prueba manual
 """aws ecs run-task \
   --cluster sunsaver-cluster \
-  --task-definition t2-retrain:1 \
+  --task-definition t2-retrain:latest \
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[subnet-0aaf5f3d23ffcfd2f],assignPublicIp=ENABLED}" \
   --region eu-south-2"""

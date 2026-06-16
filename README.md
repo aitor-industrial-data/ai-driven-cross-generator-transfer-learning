@@ -1,20 +1,134 @@
+<div align="center">
 
-"Simulo el proceso real de una empresa industrial que tiene el historial de fallos de su PLC pero instala una máquina nueva. El modelo entrenado con el historial antiguo sirve de base. Con solo unas semanas de datos de la máquina nueva el modelo se adapta sin empezar de cero. Eso es lo que diferencia la IA del mantenimiento correctivo tradicional."
+<br>
 
-"Simulo el proceso de una empresa que tiene un parque con generadores industriales síncronos antiguos con historial de fallos documentado y está modernizando con generadores de inducción SCIG de nueva instalación. El modelo entrenado con el historial eléctrico del parque antiguo sirve de base para aprender la firma de fallo del generador nuevo con muchos menos datos."
+# AI-Driven Cross-Generator Transfer Learning
+### Predictive Maintenance · Cold Start Problem · Wind Turbines
 
-"Simulo el proceso de una empresa que tiene un parque de maquinaria rotatoria antigua con historial de degradación documentado hasta el fallo. El modelo entrenado con ese historial sirve de base para detectar el fallo prematuro en equipos nuevos de diferente fabricante con muchos menos datos de operación."
+<br>
 
-El Problema Real: "Cuando una planta gasta millones en cambiar motores antiguos por motores nuevos de alta eficiencia, no puede esperar 3 años a que los motores nuevos fallen para tener datos suficientes y entrenar una IA de mantenimiento predictivo."
+[![AWS](https://img.shields.io/badge/AWS-Lambda%20%7C%20S3%20%7C%20ECR%20%7C%20ECS%20Fargate-FF9900?style=flat-square&logo=amazonaws&logoColor=white)](https://aws.amazon.com)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![LightGBM](https://img.shields.io/badge/LightGBM-Transfer%20Learning-2ecc71?style=flat-square)](https://lightgbm.readthedocs.io)
+[![PySpark](https://img.shields.io/badge/PySpark-ETL%20Pipeline-E25A1C?style=flat-square&logo=apachespark&logoColor=white)](https://spark.apache.org)
+[![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions%20%E2%86%92%20ECR%20%E2%86%92%20Lambda-2088FF?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/features/actions)
 
-La Solución de Datos: "Diseñé un pipeline donde entreno un modelo base (ej. XGBoost o una red neuronal ligera) con el histórico del parque antiguo. Luego, usando Transfer Learning (congelando capas o usando técnicas de adaptación de dominio/Fine-Tuning), re-entreno el modelo con apenas un 5% de datos del parque nuevo. El modelo es capaz de detectar los fallos nuevos desde el primer mes operando."
+<br>
 
-"El objetivo de este proyecto es resolver un problema crítico en la transición hacia la Industria 4.0: el arranque en frío (Cold Start) del mantenimiento predictivo.
+<a href="https://ai-driven-cross-generator-transfer-learning.s3.eu-south-2.amazonaws.com/html/dashboard_t2_v2.html">
+  <img src="https://img.shields.io/badge/%E2%9A%A1%20VER%20DASHBOARD%20EN%20VIVO%20%E2%86%92-Predicciones%20activas%20%C2%B7%20Turbina%202-22c55e?style=for-the-badge&labelColor=16a34a" alt="Ver Dashboard en vivo" height="45"/>
+</a>
 
-Cuando una planta industrial invierte millones en sustituir maquinaria antigua por equipos modernos y eficientes, se enfrenta a un dilema: los modelos de IA entrenados para predecir fallos ya no sirven porque las firmas de operación han cambiado, y no podemos permitirnos esperar dos años a que las máquinas nuevas rompan para acumular un nuevo historial de fallos.
+<br>
+<sub><em>Actualizado cada 24 h · Pipeline serverless en AWS · Datos reales de Kelmarsh Wind Farm</em></sub>
 
-Para demostrarlo de forma realista, utilicé el dataset Metro-PT, que contiene 7 meses de telemetría real a 1 Hz de un compresor industrial con fallos mecánicos y eléctricos reales sobre el terreno. Como Data Engineer, procesé este flujo masivo de datos aplicando ventanas móviles (Rolling Windows) para capturar la degradación temporal (la tendencia de la vibración y los picos de corriente del motor en el tiempo), evitando así que el modelo tomara decisiones basadas en fotos instantáneas aisladas.
+<br><br>
 
-Utilizando el grueso del histórico como 'Parque Antiguo', entrené un modelo base. Después, simulando la llegada del 'Parque Nuevo' con apenas un par de semanas de datos limpiaz, apliqué técnicas de Domain Adaptation / Transfer Learning para transferir el conocimiento del desgaste del motor antiguo al nuevo. El resultado es un pipeline capaz de alertar de anomalías en equipos recién instalados reduciendo la necesidad de datos históricos en más de un 80%."
+</div>
 
-"Dado que los sistemas SCADA reales no incluyen una etiqueta de fallo directa, desarrollé un pipeline en PySpark que procesa e integra el histórico de sensores con los registros de mantenimiento. Implementé una lógica de ventanas temporales para etiquetar de forma retrospectiva las horas previas a cada avería real como estado de degradación (NOK), permitiendo así al modelo aprender a identificar los síntomas antes de que ocurra la catástrofe."
+---
+
+## El problema que resuelve
+
+Un parque eólico renueva una turbina. Los ingenieros tienen años de histórico de la máquina antigua: miles de horas de telemetría SCADA, registros de averías, patrones de desgaste conocidos. Pero el modelo de IA entrenado sobre esos datos **ya no sirve para la máquina nueva**: las firmas operativas han cambiado, los rangos térmicos difieren, los comportamientos antes de fallo son distintos.
+
+La alternativa obvia —esperar a que la nueva turbina acumule su propio historial de averías— puede significar dos años de operación a ciegas. Dos años en los que cualquier fallo no anticipado en el generador, el sistema hidráulico o el pitch supone una parada no planificada de días, grúas de emergencia y pérdidas que en eólico offshore pueden ser muy elevadas por evento.
+
+Esto es el **Cold Start del mantenimiento predictivo**, y no tiene solución trivial.
+
+---
+
+## La solución: Transfer Learning entre generadores
+
+La hipótesis de este proyecto es que **el conocimiento físico de la degradación es transferible** entre turbinas del mismo tipo, aunque operen en condiciones distintas. Los síntomas previos a un fallo hidráulico —la deriva lenta de presión, los picos de corriente en el freno, la acumulación de calor— siguen la misma física en una turbina y en otra.
+
+El sistema usa la Turbina 1 (T1) con cinco años de histórico como **donante de conocimiento**. La Turbina 2 (T2), recién operativa, arranca protegida desde el primer día.
+
+```
+T1 · 5 años de SCADA + averías reales
+            │
+            │  Entrenamiento inicial
+            ▼
+     Modelo base T1
+            │
+            │  Transfer Learning
+            │  (T2 arranca sin historial de fallos)
+            ▼
+  Modelo T1+T2 en producción  ──→  Alertas diarias sobre T2
+```
+
+Pero la solución no termina ahí. A medida que T2 opera y acumula sus propios eventos de fallo, el sistema evalúa automáticamente si el modelo beneficia más entrenado con **T1+T2 combinados** o ya solo con **datos propios de T2**. Con el tiempo, T2 habrá acumulado suficiente historial propio para no necesitar a T1. El sistema detecta ese momento y conmuta solo.
+
+---
+
+## Cómo funciona el sistema
+
+**Inferencia diaria** — Cada noche, una Lambda serverless consume el SCADA del día de T2, actualiza los Feature Stores por familia de fallo y publica predicciones de horas-hasta-avería para el día siguiente. El dashboard del operario se actualiza automáticamente.
+
+**Reentrenamiento mensual** — El día 1 de cada mes, un contenedor en ECS Fargate entrena dos versiones del modelo para cada familia:
+
+- Versión A: entrenada únicamente con datos de T2 acumulados hasta la fecha
+- Versión B: entrenada con el histórico completo de T1 más los datos de T2
+
+Ambas versiones se evalúan sobre el test set real de T2. La que mejor Event Recall alcanza se despliega automáticamente como modelo en producción. No hay intervención manual.
+
+A medida que T2 acumula meses de operación, se espera que la Versión A vaya ganando terreno progresivamente hasta superar a la Versión B de forma consistente. Ese cruce es la validación empírica central del proyecto: **el Transfer Learning es útil exactamente mientras los datos propios son insuficientes**, y el sistema lo detecta y gestiona solo.
+
+---
+
+## Por qué este problema es difícil
+
+Los fallos industriales en turbinas eólicas no son eventos simples de clasificar. Son raros —una familia de fallo puede tener una docena de eventos en cinco años—, heterogéneos —el mismo código puede tener causas distintas en distintas épocas del año— y con un lag temporal no trivial: un fallo de pitch puede gestarse 12 días antes de manifestarse; uno hidráulico, menos de una semana.
+
+El SCADA no etiqueta fallos, etiqueta *paradas*. Distinguir una parada por mantenimiento programado de una avería real requiere una auditoría código a código sobre más de 75 tipos de evento distintos. Los sensores tienen huecos, derivas y headers malformados. Y los regressores sobre series temporales industriales comprimen sus predicciones hacia la media si no se calibran explícitamente, produciendo alertas que llegan siempre tarde o siempre pronto.
+
+Cada una de esas fricciones está resuelta en este pipeline.
+
+---
+
+## Arquitectura AWS
+
+```
+GitHub push
+    │
+    └─→  GitHub Actions (OIDC)
+              │
+              ├─→  ECR  ←──────────────────────────────────────┐
+              │     └─ imagen inferencia (Lambda / python:3.12) │
+              │     └─ imagen reentrenamiento (Fargate / slim)  │
+              │                                                  │
+              └─→  Lambda t2-inference  ←── EventBridge (diario)│
+                        │                                        │
+              ECS Fargate t2-retrain  ←── EventBridge (día 1)───┘
+                        │
+                        ▼
+              S3: bronze/ · models/ · html/
+                        │
+                        └─→  Dashboard HTML (acceso público)
+```
+
+Región `eu-south-2 (Madrid)` · Imágenes desplegadas por digest · OIDC sin credenciales de larga duración
+
+---
+
+## Pipeline de desarrollo (T1 · Kelmarsh 2018–2022)
+
+| Notebook | Qué resuelve |
+|---|---|
+| `01_eda_status_and_events` | Auditoría de 75+ códigos de evento → 52 válidos. Descarte documentado de 3 familias |
+| `02_eda_telemetry_and_sensors` | ~300 señales SCADA · limpieza de headers `#`-prefijados · selección por disponibilidad física |
+| `03_merge_and_cleaning` | Bronze → Silver · exclusión de 24 h post-fallo · gestión de columnas variables por año |
+| `04_labeling` | Etiquetado temporal `hours_to_fault` con lead time por familia · split 60/20/20 estrictamente temporal |
+| `05_features` | Features de dominio (yaw error ponderado por viento, deltas térmicos) + rolling statistics 7 días |
+| `06_train` ×4 | LightGBM regresor independiente por familia · evaluación por Event Recall sobre eventos reales |
+| `07_calibration` | Isotonic Regression sobre salida del regresor · convierte predicciones en probabilidades accionables |
+
+---
+
+## Documentación técnica
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — Infraestructura AWS completa y flujo de datos
+- [`docs/ML_DESIGN.md`](docs/ML_DESIGN.md) — Diseño del pipeline ML: familias, etiquetado, features, métricas
+- [`docs/PRODUCTION.md`](docs/PRODUCTION.md) — Operación: inferencia diaria, reentrenamiento, cold start
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — Registro de decisiones técnicas y alternativas descartadas
+- [`docs/DATA.md`](docs/DATA.md) — Dataset, esquema Bronze/Silver, Feature Stores, catálogo de fault codes
