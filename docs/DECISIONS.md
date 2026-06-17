@@ -1,155 +1,118 @@
-# Decisiones Técnicas del Pipeline de Mantenimiento Predictivo
-## Kelmarsh Wind Farm — Turbina T1 · 2018–2021
+# Decisions — AI-Driven Cross-Generator Transfer Learning
+
+Registro de las decisiones técnicas relevantes tomadas durante el desarrollo, con la alternativa considerada y la justificación de la elección. Este documento existe porque las decisiones de diseño en ML son tan importantes como el código —y con frecuencia mucho más difíciles de reconstruir a posteriori.
 
 ---
 
-## Contexto
+## 1. Qué predecir: regresión sobre `hours_to_fault` vs. clasificación binaria
 
-Este documento registra las decisiones de diseño relevantes tomadas durante el desarrollo del pipeline de mantenimiento predictivo para la turbina 1 de Kelmarsh. El objetivo es que cualquier persona que trabaje sobre este código entienda **por qué** las cosas están como están, no solo **cómo** funcionan.
+**Alternativa descartada:** clasificación binaria `is_pre_fault ∈ {0, 1}`.
 
----
+**Decisión:** regresión sobre `hours_to_fault` continuo, con `is_pre_fault` derivado como columna secundaria.
 
-## 1. Selección de Familias de Fallos
-
-### Familias entrenables
-
-A partir del catálogo de códigos de fallo (`fault_log.csv`), se identificaron 7 grupos candidatos. Cuatro se descartaron:
-
-| Familia descartada | Motivo |
-|--------------------|--------|
-| `sensors_anemometer` | Todos los eventos se concentran en un único mes (diciembre 2021). Sin distribución temporal suficiente para aprender. |
-| `tower_vibration` | Los fallos de vibración de torre ocurren en escala de segundos. La resolución de SCADA (10 minutos) es incompatible con la dinámica del fallo. |
-| `drivetrain` | Un único evento histórico en todo el dataset. Imposible entrenar. |
-
-Las cuatro familias entrenables son:
-
-| Familia | Eventos | Tipo de degradación |
-|---------|---------|---------------------|
-| `yaw_cable` | 187 | Acumulación gradual — contador de vueltas de cable sube linealmente |
-| `brake_hydro` | 58 | Degradación mecánica/hidráulica — presión y temperatura |
-| `generator` | 55 | Degradación térmica — temperatura de rodamientos |
-| `pitch_bat` | 30 | Degradación electroquímica — baterías bajo estrés térmico |
+**Justificación:** la clasificación binaria colapsa toda la ventana de pre-fallo en una sola clase. El modelo no aprende que estar a 5 horas del fallo es cualitativamente distinto a estar a 120 horas — ambos son simplemente "1". La regresión preserva esa gradiente: el modelo aprende la urgencia, no solo el estado. Esto produce calibración más precisa, alertas con antelación variable según la familia, y un dashboard que puede mostrar al operario cuánto tiempo tiene para actuar en lugar de solo si hay riesgo.
 
 ---
 
-## 2. Lead Times
+## 2. Auditoría manual del catálogo de fault codes
 
-### Primera iteración (descartada)
+**Alternativa descartada:** filtrado automático por frecuencia o por categoría contractual SCADA.
 
-Los lead times iniciales eran: `yaw_cable=168h, brake_hydro=120h, generator=120h, pitch_bat=336h`.
+**Decisión:** inspección manual código a código de los 72 eventos de tipo Stop y Warning.
 
-Con `yaw_cable=168h`, el 47% del dataset quedaba etiquetado como positivo. Con ese nivel de desbalance, el modelo no necesita discriminar: clasificar todo como positivo da un Recall=1.0 trivialmente. El AUC-ROC resultante era 0.51 (azar).
+**Justificación:** el filtrado por frecuencia eliminaría fallos críticos de baja ocurrencia —precisamente los más costosos— y retendría ruido frecuente como las pruebas de batería (código 710, 248 ocurrencias). El filtrado por categoría contractual agrupa códigos heterogéneos: la categoría "Warnings" incluye tanto averías reales como alertas de mantenimiento planificado. Solo la auditoría visual con contexto de dominio puede distinguir un fallo técnico real de un evento operativo. No hay algoritmo que lo haga sin ese conocimiento previo.
 
-### Lead times definitivos
+El resultado fue la eliminación de 20 códigos en tres categorías:
 
-| Familia | Lead time | Criterio |
-|---------|-----------|---------|
-| `yaw_cable` | **72h** | Con 72h el porcentaje de positivos baja al 25%, nivel donde el modelo aprende a discriminar. La señal de `cable_windings` es claramente visible 3 días antes. |
-| `brake_hydro` | **120h** | Sin cambio. La degradación del acumulador y la presión de la bomba son visibles 5 días antes. |
-| `generator` | **120h** | Sin cambio. El calentamiento de rodamientos sube gradualmente en los 5 días previos. |
-| `pitch_bat` | **336h** | Sin cambio. La degradación de baterías bajo estrés térmico es un proceso lento, detectable hasta 2 semanas antes. |
+- **Mantenimiento planificado**: pruebas de batería (710, 707), limpieza de aceite hidráulico (5760), contador de horas (5700). Son tareas programadas, no síntomas de degradación.
+- **Causas externas**: cortes de red (3570, 3500), hielo (6682, 6690, 6540), sobrefrequencia de red (3585, 3590), viento excesivo (64). No tienen precursores detectables en el SCADA de la turbina.
+- **Acciones humanas**: paradas manuales en campo (20) y remoto (21, 25), frenado manual (210), park master (8000). Son comandos deliberados, no fallos.
 
----
+Dos códigos merecen mención especial por haber sido objeto de decisión explícita:
 
-## 3. Feature Engineering
+**Código 675** (`Pitch measuring system 1><2`): inicialmente excluido por considerarse fallo de sensor. Revisado y confirmado que puede ser precursor de fallo mecánico de pitch real. Incluido en la familia `pitch_bat`.
 
-### Por qué no se usan features de pendiente (slope)
-
-Durante el desarrollo se probaron features de pendiente lineal (`slope`) para ventanas de 1h, 6h, 24h y 7 días. El análisis de AUC univariante mostró AUC = 0.500 en todas las familias y todas las ventanas — equivalente a predicción aleatoria.
-
-La razón es física: en turbinas eólicas los sensores fluctúan continuamente con el viento, la carga y la temperatura exterior. La degradación no produce una pendiente monótona, sino **valores extremos cada vez más frecuentes**. La señal está en la frecuencia de excedencia de umbrales históricos, no en la pendiente puntual.
-
-### Features implementadas
-
-Para cada sensor, en cuatro ventanas (1h, 6h, 24h, 7d):
-- `mean`: nivel promedio — detecta derivas lentas
-- `std`: variabilidad — detecta inestabilidad creciente
-- `p95`: percentil 95 — el sensor empieza a tocar valores extremos
-- `exceedance`: fracción del tiempo por encima del p90 del baseline — frecuencia de excedencia
-
-Más un `baseline_ratio` en ventana 7d: media actual dividida entre media de los primeros 180 días de operación limpia.
-
-### Decisión sobre `pitch_bat`: temperatura absoluta vs delta
-
-En la primera implementación, `nacelle_ambient_temperature_c` era la feature más importante para `pitch_bat`. El modelo estaba aprendiendo **estacionalidad** (en invierno hay más fallos de batería) en lugar de **degradación** (la batería no aguanta el frío).
-
-La solución fue sustituir las temperaturas absolutas de los motores por deltas motor-ambiente (`t_motorX_vs_ambient`). Con esta feature, el modelo aprende «el motor no está calentando lo esperado respecto al frío exterior», que es la señal real de batería degradada.
+**Código 8400** (`Comm. failure FPM`): excluido definitivamente. Pérdida de comunicación con el módulo de potencia sin correlación con degradación mecánica — aparece también durante mantenimientos de red. Incluir este código contaminaría el etiquetado con falsos positivos sistemáticos.
 
 ---
 
-## 4. Modelo y Entrenamiento
+## 3. Familias de fallo descartadas para ML
 
-### LightGBM con class_weight='balanced'
+**Sensores / Anemómetros** (códigos 6515, 6525, 6530, 6620, 6622, 6635): los 86 eventos están concentrados en un único mes —diciembre 2021— lo que indica un incidente puntual de hardware de sensor, no un patrón de degradación aprendible con cinco años de datos. Un modelo entrenado sobre un único incidente no generaliza. La detección se implementa mejor como regla determinista: divergencia entre sensor 1 y sensor 2 superior a 1.5 m/s durante tres intervalos consecutivos → alerta directa, sin ML.
 
-Se eligió LightGBM por tres motivos:
-1. Maneja bien el desequilibrio de clases con `class_weight='balanced'`
-2. Tolerante a features correlacionadas (natural en sensores de una misma turbina)
-3. Early stopping integrado — el número de árboles se determina automáticamente
+**Torre / Vibración** (códigos 4510, 4520, 4540, 59): dos problemas independientes. Primero, solo 26 eventos en cuatro años es insuficiente estadísticamente para entrenar cualquier modelo. Segundo, y más importante, las oscilaciones de torre son fenómenos que ocurren en segundos y quedan completamente enmascarados en la media de 10 minutos del SCADA. Para detectar este fallo se necesitarían datos de acelerómetro a frecuencia mínima de 1 Hz — fuera del alcance de este dataset.
 
-### Split temporal, no aleatorio
-
-El split train/test es **temporal**: 80% más antiguo para train, 20% más reciente para test. Un split aleatorio permitiría que el modelo vea en train datos de 2021 y prediga en test datos de 2018, introduciendo data leakage temporal.
-
-### Selección de threshold
-
-El threshold de clasificación no es fijo (0.5) sino adaptativo por familia: se elige el menor valor de probabilidad que mantiene una Precision por fila ≥ 10%. El objetivo es maximizar el Recall (detectar fallos) con un mínimo de calidad en las alertas.
+**Drivetrain** (código 1070): un único evento en todo el período 2018–2022. Sin mínimo estadístico posible para ningún enfoque supervisado.
 
 ---
 
-## 5. Métrica Principal: Event Recall
+## 4. Lead times por familia
 
-Las métricas por fila (Precision/Recall/F1 calculados sobre cada intervalo de 10 minutos) son útiles para el desarrollo pero no reflejan el valor operativo del sistema.
+Los lead times son la decisión de diseño con mayor impacto sobre la calidad del etiquetado. El criterio no fue empírico-estadístico sino físico-estadístico combinado: ¿cuántas horas antes del fallo hay señal detectable en los sensores, dado un porcentaje de positivos que permita discriminar?
 
-Lo que importa en producción es: **de los N fallos reales que ocurrieron en el período de test, ¿cuántos recibieron al menos una alerta en las horas previas?**
+El porcentaje de positivos en train actúa como restricción práctica: por encima del 30%, el modelo puede alcanzar métricas aceptables prediciendo siempre "pre-fallo" sin aprender ningún patrón real. Por debajo del 2%, hay tan pocas filas positivas que el modelo no tiene suficiente señal para aprender.
 
-Esta métrica se denomina **Event Recall** en el código. Un Event Recall de 0.90 significa que el sistema habría dado aviso antes del 90% de los fallos reales.
-
-### Resultados finales (período de test: 2021-03 → 2021-12)
-
-| Familia | Fallos en test | Detectados | Event Recall |
-|---------|---------------|------------|-------------|
-| `yaw_cable` | 24 | 24 | **1.00** ✅ |
-| `generator` | 4 | 4 | **1.00** ✅ |
-| `pitch_bat` | 2 | 2 | **1.00** ✅ |
-| `brake_hydro` | 3 | 1 | **0.33** — ver nota |
+| Familia | Lead time final | % positivos en train | Rango evaluado |
+|---|:---:|:---:|---|
+| `yaw_cable` | 83 h | ~16% | 48h–168h · descartado 168h (47% positivos) |
+| `generator` | 127 h | ~17% | 72h–200h |
+| `brake_hydro` | 130 h | ~22% | 72h–200h |
+| `pitch_bat` | 295 h | ~17% | 168h–400h |
 
 ---
 
-## 6. Limitación Documentada: brake_hydro en Test
+## 5. Split temporal estricto vs. split aleatorio
 
-Los 3 fallos de `brake_hydro` en el período de test son:
+**Alternativa descartada:** `train_test_split` con `shuffle=True` o `StratifiedKFold`.
 
-| Fecha | Código | Descripción | Tipo |
-|-------|--------|-------------|------|
-| 2021-07-25 | 5510 | Low hydraulic pressure | Rotura abrupta de presión — no predecible |
-| 2021-08-12 | 5720 | Brake accumulator defect | Fallo en cascada provocado por `3000 Frequency converter not ready` — causa raíz en otro sistema |
-| 2021-09-06 | 2125 | Timeout brake closed | Fallo en cascada junto con `2674 Overload generator heating` — causa raíz térmica |
+**Decisión:** split temporal 60/20/20 por posición en el tiempo, sin aleatorización.
 
-Ninguno de los tres es un fallo de degradación gradual del sistema hidráulico. El Event Recall de 0.33 en test es el **techo físico** para este conjunto de fallos específicos, no una limitación del modelo. El modelo sí aprende la degradación hidráulica gradual (visible en el período de train), pero el período de test no contiene ese tipo de eventos.
+**Justificación:** los datos de series temporales tienen dependencia temporal. Una fila de telemetría del lunes predice el estado del miércoles. Si el miércoles cae en train y el lunes en test, el modelo vio en entrenamiento información que cronológicamente era posterior al test — data leakage estructural. La validación cruzada estándar es inaplicable por el mismo motivo. El split temporal garantiza que el modelo solo puede predecir sobre datos que cronológicamente son posteriores a su entrenamiento, exactamente como ocurre en producción.
 
 ---
 
-## 7. Estructura de Archivos
+## 6. Exclusión de las 24 horas posteriores a cada fallo
 
-```
-data/
-  bronze/          ← archivos CSV anuales originales (sin modificar)
-  silver/
-    fault_log.CSV                       ← producido por 01
-    turbine_1_telemetry_clean.parquet   ← producido por 03
-    fault_targets_grouped.parquet       ← producido por 03
-    dataset_labeled.parquet             ← producido por 04
-    features_{familia}.parquet          ← producidos por 05 (uno por familia)
-  models/
-    model_{familia}.pkl                 ← modelos serializados, producidos por 06
-    results_{familia}.json              ← métricas de entrenamiento
-    feature_importance_{familia}.png    ← gráficos de importancia
-    pr_curve_{familia}.png              ← curvas Precision-Recall
-    timeline_{familia}.png              ← timelines de alertas vs fallos reales
-```
+**Decisión:** las 24 horas de telemetría inmediatamente posteriores a cada evento de fallo se eliminan del dataset de entrenamiento.
+
+**Justificación:** en el período de transición post-reparación, los sensores exhiben comportamiento atípico: temperaturas descendiendo desde picos de fallo, presiones recuperándose, sistemas reiniciándose. Incluir esas filas como "estado sano" contaminaría la clase negativa con patrones que son en realidad consecuencia del fallo, no estado normal de operación. El modelo aprendería que "recién después de fallar" es estado sano — exactamente lo contrario de lo que se quiere.
 
 ---
 
-## 8. Siguiente Fase (fuera del alcance actual)
+## 7. LightGBM vs. otras alternativas
 
-La siguiente fase del proyecto es el transfer learning a turbinas nuevas: entrenar un modelo base con el histórico de T1 y reentrenarlo con los primeros meses de datos de T2, T3 y T4 para que no empiece desde cero. Esta fase está pendiente hasta validar el rendimiento del modelo base en T1.
+**Alternativas evaluadas:** XGBoost, Random Forest, modelos lineales (Ridge, Lasso).
+
+**Decisión:** LightGBM Regressor.
+
+**Justificación:** en el espacio de features de alta dimensionalidad con muchas rolling statistics correlacionadas, los modelos de boosting por histograma tienen mejor comportamiento que Random Forest (más eficientes en memoria, mejores en features dispersas) y que XGBoost (más rápido en convergencia con `num_leaves` como parámetro principal). Los modelos lineales no capturan las interacciones no lineales entre features de ventana y features de dominio que son centrales en este problema.
+
+El parámetro más crítico por familia fue `num_leaves`: controla la complejidad del árbol y es el principal mecanismo de regularización en datos con desequilibrio de clases. `brake_hydro` usa `num_leaves=31` (árbol más conservador) por tener el mayor desequilibrio relativo.
+
+---
+
+## 8. Features de pendiente descartadas
+
+**Decisión:** las features de pendiente (`slope` sobre ventanas temporales) se calcularon y descartaron tras evaluación.
+
+**Justificación:** AUC univariante de 0.500 en todas las familias —equivalente a predicción aleatoria. La degradación en turbinas eólicas no sigue una rampa monótona que una pendiente pueda capturar: los sensores fluctúan continuamente con el viento, la carga y la temperatura exterior. La señal predictiva está en los valores extremos sostenidos y en la frecuencia de excedencia del baseline histórico, no en la derivada puntual del valor.
+
+---
+
+## 9. Isotonic Regression vs. Platt Scaling para calibración
+
+**Alternativa descartada:** Platt Scaling (regresión logística sobre la salida del regresor).
+
+**Decisión:** Isotonic Regression.
+
+**Justificación:** Platt Scaling asume que la relación entre predicción bruta y valor real es sigmoidal — razonable para clasificadores de margen como SVM, pero sin justificación para la salida de un regresor de árboles. Isotonic Regression aprende cualquier función monótona no paramétrica, lo que la hace más adecuada para corregir la compresión hacia la media que produce LightGBM cuando el número de árboles efectivos es limitado. La única restricción que impone —monotonía— es exactamente la que se desea: una predicción bruta más alta debe corresponder a un valor calibrado más alto.
+
+---
+
+## 10. Métrica principal: Event Recall vs. AUC-ROC o F1
+
+**Alternativas consideradas:** AUC-ROC, F1, Precision@K.
+
+**Decisión:** Event Recall como métrica primaria de selección de modelo.
+
+**Justificación:** AUC-ROC mide la capacidad discriminante fila a fila, ignorando la estructura temporal de los eventos. Un modelo puede tener AUC-ROC de 0.90 y fallar en detectar el 40% de los fallos reales si sus aciertos están concentrados en filas individuales alejadas del evento. F1 tiene el mismo problema: pondera iguales las filas positivas independientemente de si su acierto contribuye a detectar un fallo real o no. Event Recall mide exactamente lo que importa operativamente: de los fallos reales que ocurrieron, cuántos recibieron al menos una alerta antes de tiempo. Un fallo no anticipado tiene un coste concreto —parada no planificada, grúa, reparación de emergencia—. Un fallo anticipado tiene coste cero en comparación. La métrica tiene que reflejar esa asimetría.

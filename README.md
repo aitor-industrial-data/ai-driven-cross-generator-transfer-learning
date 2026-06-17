@@ -32,7 +32,7 @@
 
 Un parque eólico renueva una turbina. Los ingenieros tienen años de histórico de la máquina antigua: miles de horas de telemetría SCADA, registros de averías, patrones de desgaste conocidos. Pero el modelo de IA entrenado sobre esos datos **ya no sirve para la máquina nueva**: las firmas operativas han cambiado, los rangos térmicos difieren, los comportamientos antes de fallo son distintos.
 
-La alternativa obvia —esperar a que la nueva turbina acumule su propio historial de averías— puede significar dos años de operación a ciegas. Dos años en los que cualquier fallo no anticipado en el generador, el sistema hidráulico o el pitch supone una parada no planificada de días, grúas de emergencia y pérdidas que en eólico offshore pueden ser muy elevadas por evento.
+La alternativa obvia —esperar a que la nueva turbina acumule su propio historial de averías— puede significar dos años de operación a ciegas. Dos años en los que cualquier fallo no anticipado en el generador, el sistema hidráulico o el pitch supone una parada no planificada de días, grúas de emergencia y pérdidas que en eólico offshore pueden superar los 200.000€ por evento.
 
 Esto es el **Cold Start del mantenimiento predictivo**, y no tiene solución trivial.
 
@@ -74,6 +74,8 @@ Ambas versiones se evalúan sobre el test set real de T2. La que mejor Event Rec
 
 A medida que T2 acumula meses de operación, se espera que la Versión A vaya ganando terreno progresivamente hasta superar a la Versión B de forma consistente. Ese cruce es la validación empírica central del proyecto: **el Transfer Learning es útil exactamente mientras los datos propios son insuficientes**, y el sistema lo detecta y gestiona solo.
 
+La fiabilidad real del sistema no se mide en el test set inicial —que tiene pocos fallos de T2 y poco tiempo de operación—, sino en la calidad de sus predicciones sobre fallos reales a medida que el parque opera. Un modelo de mantenimiento predictivo sobre equipos industriales se afina durante años, no durante semanas. Lo que este proyecto garantiza es que T2 **no arranca desde cero**: hereda una base de conocimiento sólida que de otro modo requeriría años de averías propias para construir.
+
 ---
 
 ## Por qué este problema es difícil
@@ -82,7 +84,7 @@ Los fallos industriales en turbinas eólicas no son eventos simples de clasifica
 
 El SCADA no etiqueta fallos, etiqueta *paradas*. Distinguir una parada por mantenimiento programado de una avería real requiere una auditoría código a código sobre más de 75 tipos de evento distintos. Los sensores tienen huecos, derivas y headers malformados. Y los regressores sobre series temporales industriales comprimen sus predicciones hacia la media si no se calibran explícitamente, produciendo alertas que llegan siempre tarde o siempre pronto.
 
-Cada una de esas fricciones está resuelta en este pipeline.
+Cada una de esas fricciones está resuelta en este pipeline. Pero resolver la ingeniería no elimina la limitación más fundamental: **los fallos industriales son eventos raros**. T1 acumuló cinco años de operación para tener suficientes eventos de cada familia. T2 lleva meses. El sistema está diseñado para ser útil desde el primer día, pero su fiabilidad real crecerá con cada fallo nuevo que registre, con cada reentrenamiento mensual, con cada año adicional de operación. La arquitectura de mejora continua no es un complemento — es parte central del diseño.
 
 ---
 
@@ -93,13 +95,13 @@ GitHub push
     │
     └─→  GitHub Actions (OIDC)
               │
-              ├─→  ECR  ←──────────────────────────────────────┐
-              │     └─ imagen inferencia (Lambda / python:3.12) │
-              │     └─ imagen reentrenamiento (Fargate / slim)  │
+              ├─→  ECR  ←────────────────────────────────────────┐
+              │     └─ imagen inferencia (Lambda / python:3.12)  │
+              │     └─ imagen reentrenamiento (Fargate / slim)   │
               │                                                  │
-              └─→  Lambda t2-inference  ←── EventBridge (diario)│
+              └─→  Lambda t2-inference  ←── EventBridge (diario) │
                         │                                        │
-              ECS Fargate t2-retrain  ←── EventBridge (día 1)───┘
+              ECS Fargate t2-retrain  ←── EventBridge (día 1)────┘
                         │
                         ▼
               S3: bronze/ · models/ · html/
