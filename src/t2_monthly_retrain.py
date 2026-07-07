@@ -359,9 +359,29 @@ def train_and_evaluate(df: pd.DataFrame, family: str, cfg: dict,
     logger.info('  [%s] Train pos: %d | Val pos: %d | Test pos: %d',
                 source_label, len(train_pos), len(val_pos), len(test_pos))
 
-    if len(train_pos) < 10 or len(val_pos) < 5:
-        logger.warning('  [%s] Datos insuficientes para entrenar %s. Saltando.',
-                       source_label, family)
+    # Guard basado en eventos únicos (fallos), no en filas.
+    # Con telemetría a 10min, 1 fallo genera ~lead_hours*6 filas positivas,
+    # por lo que el umbral de filas (<10, <5) era siempre conservador.
+    # Un fallo = bajada de hours_to_fault; detectamos cambios negativos en la columna.
+    def _count_events(df_pos: pd.DataFrame) -> int:
+        if df_pos.empty:
+            return 0
+        diffs = df_pos[hours_col].diff()
+        # Nuevo evento cuando hours_to_fault sube (transición entre ventanas de fallos distintos)
+        return int((diffs > 0).sum()) + 1
+
+    n_events_train = _count_events(train_pos)
+    n_events_val   = _count_events(val_pos)
+
+    MIN_TRAIN_EVENTS = 3  # mínimo de fallos únicos para entrenar
+    MIN_VAL_EVENTS   = 1  # mínimo para calibrar isotónico
+
+    logger.info('  [%s] Eventos únicos — train: %d | val: %d',
+                source_label, n_events_train, n_events_val)
+
+    if n_events_train < MIN_TRAIN_EVENTS or n_events_val < MIN_VAL_EVENTS:
+        logger.warning('  [%s] Eventos insuficientes para entrenar %s (train=%d val=%d). Saltando.',
+                       source_label, family, n_events_train, n_events_val)
         return None
 
     X_train = train_pos[feat_cols].fillna(0)
@@ -766,5 +786,3 @@ if __name__ == '__main__':
 """aws logs tail /ecs/t2-retrain \
   --follow \
   --region eu-south-2"""
-
-#prueba reentreno
