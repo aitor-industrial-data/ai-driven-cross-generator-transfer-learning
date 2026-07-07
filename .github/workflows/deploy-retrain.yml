@@ -104,6 +104,7 @@ jobs:
                 "NetworkConfiguration": {
                   "awsvpcConfiguration": {
                     "Subnets": ["subnet-0aaf5f3d23ffcfd2f"],
+                    "SecurityGroups": ["sg-07abe30f83ee437cb"],
                     "AssignPublicIp": "ENABLED"
                   }
                 }
