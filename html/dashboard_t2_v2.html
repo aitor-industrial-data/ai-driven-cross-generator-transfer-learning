@@ -601,6 +601,19 @@ footer {
 .filter-btn:hover, .filter-btn.active {
   background: var(--bg3); border-color: var(--border2); color: var(--text);
 }
+/* ── Spark window selector ── */
+.spark-window-btns {
+  display: flex; gap: .25rem; flex-shrink: 0;
+}
+.spark-win-btn {
+  background: var(--bg2); border: 1px solid var(--border);
+  color: var(--text3); font-family: 'JetBrains Mono', monospace;
+  font-size: .7rem; font-weight: 600;
+  padding: .28rem .65rem; border-radius: var(--radius);
+  cursor: pointer; transition: all .18s;
+}
+.spark-win-btn:hover { background: var(--bg3); color: var(--text); border-color: var(--border2); }
+.spark-win-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .log-count-badge {
   margin-left: auto; font-size: .72rem;
   color: var(--text3); font-family: 'JetBrains Mono', monospace;
@@ -1029,9 +1042,15 @@ footer {
   </div>
 
   <!-- Sparklines históricos -->
-  <div class="section-header">
+  <div class="section-header" style="flex-wrap:wrap;gap:.5rem;align-items:center">
     <span class="section-title">Evolución Pred_h por Familia</span>
-    <span class="section-sub">tendencia diaria de horas hasta fallo predichas</span>
+    <span class="section-sub" style="flex:1">tendencia diaria de horas hasta fallo predichas</span>
+    <div class="spark-window-btns">
+      <button class="spark-win-btn" onclick="setSparkWindow(30,this)">30d</button>
+      <button class="spark-win-btn active" onclick="setSparkWindow(90,this)">90d</button>
+      <button class="spark-win-btn" onclick="setSparkWindow(180,this)">6m</button>
+      <button class="spark-win-btn" onclick="setSparkWindow(0,this)">Todo</button>
+    </div>
   </div>
   <div id="op-timeline-grid" class="op-timeline-grid">
     <!-- generado por JS -->
@@ -1757,6 +1776,7 @@ let opPage       = 0;
 const OP_PAGE_SIZE = 15;
 const opSparkData = {}; // family -> [{date, pred_h}]
 const opSparkCharts = {};
+let sparkWindowDays = 90; // default: últimos 90 días
 
 function parseCSV(text) {
   const lines = text.trim().split('\n');
@@ -1899,6 +1919,13 @@ function buildSparkData() {
   });
 }
 
+function setSparkWindow(days, btn) {
+  sparkWindowDays = days;
+  document.querySelectorAll('.spark-win-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderSparklines();
+}
+
 function renderSparklines() {
   const grid = document.getElementById('op-timeline-grid');
   grid.innerHTML = Object.entries(OP_FAM_META).map(([key, meta]) => `
@@ -1918,7 +1945,16 @@ function renderSparklines() {
     Object.entries(OP_FAM_META).forEach(([key, meta]) => {
       const ctx = document.getElementById(`spark-${key}`);
       if (!ctx) return;
-      const data = opSparkData[key] || [];
+
+      // Filtrar por ventana temporal
+      let data = opSparkData[key] || [];
+      if (sparkWindowDays > 0 && data.length) {
+        const cutoff = new Date(data[data.length - 1].date);
+        cutoff.setDate(cutoff.getDate() - sparkWindowDays);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        data = data.filter(d => d.date >= cutoffStr);
+      }
+
       if (opSparkCharts[key]) { opSparkCharts[key].destroy(); }
       opSparkCharts[key] = new Chart(ctx, {
         type: 'line',
@@ -2395,6 +2431,9 @@ loadData();
   .op-status-grid { grid-template-columns:1fr; gap:.75rem; }
   .op-hours-big { font-size:2rem; }
   .op-timeline-grid { grid-template-columns:1fr; }
+  /* spark window selector: ocupa ancho completo en móvil */
+  .spark-window-btns { width:100%; justify-content:flex-end; }
+  .spark-win-btn { flex:1; text-align:center; min-height:34px; font-size:.68rem; }
   /* alert log controls: en movil rompe en 2 filas y botones táctiles */
   .panel-header { flex-direction:column; align-items:flex-start; gap:.6rem; }
   .alert-log-controls { flex-wrap:wrap; gap:.4rem; width:100%; margin:0; overflow-x:visible; padding-bottom:0; }
