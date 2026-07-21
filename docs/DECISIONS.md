@@ -136,4 +136,18 @@ El umbral de alerta (`alert_h`, aplicado sobre `cal_pred` en el Paso 6 de la Lam
 
 **Decisión aplicada:** se baja el umbral de `yaw_cable` de 48h a 36h, único caso donde coinciden dos fuentes independientes de evidencia: el suelo operativo estimado (24–36h) y el análisis de datos sobre predicciones reales de producción (barrido de umbral sobre `t2_predictions_log.csv` vs. `turbine_2_fault_log.csv`, que mantiene Event Recall=100% hasta 34h). Las otras tres familias se mantienen sin cambios: no hay eventos reales suficientes en la ventana de predicciones de producción para validar un ajuste con datos, y no se quiere bajar un umbral solo por estimación experta sin ese respaldo.
 
-**Pendiente:** repetir este barrido cada mes tras el reentreno, por familia y por versión de modelo (T2-only y T1+T2 tienen perfiles de error distintos —MAE calibrado 35.3h vs 21.2h en `yaw_cable`— por lo que el umbral óptimo puede no ser el mismo para ambas). El umbral resultante nunca debe bajar del suelo operativo mínimo de la tabla anterior, aunque los datos sugieran que se podría; solo se ajusta hacia arriba si la evidencia de datos lo justifica, o hacia abajo hasta ese suelo si el Event Recall se mantiene en 100%.
+**Pendiente:** repetir este barrido cuando corresponda (ver sección 12 — criterio por volumen de eventos, no por calendario), por familia y por versión de modelo (T2-only y T1+T2 tienen perfiles de error distintos —MAE calibrado 35.3h vs 21.2h en `yaw_cable`— por lo que el umbral óptimo puede no ser el mismo para ambas). El umbral resultante nunca debe bajar del suelo operativo mínimo de la tabla anterior, aunque los datos sugieran que se podría; solo se ajusta hacia arriba si la evidencia de datos lo justifica, o hacia abajo hasta ese suelo si el Event Recall se mantiene en 100%.
+
+---
+
+## 12. Revisión de umbral: por volumen de eventos, no por calendario
+
+**Decisión:** la revisión del umbral de alerta se hace manualmente, cuando una familia acumule un mínimo de eventos reales nuevos desde la última revisión — no como paso automático dentro del reentreno mensual.
+
+**Alternativa descartada:** recalcular el umbral automáticamente en cada ejecución de `t2_monthly_retrain.py`.
+
+**Justificación:** al ritmo actual de acumulación de fallos en `turbine_2_fault_log.csv` (del orden de 1 evento cada varias semanas, repartido entre 4 familias), un recálculo mensual automático no tendría datos nuevos que evaluar la mayoría de los meses — coste de mantenimiento de una pieza de automatización sin beneficio real la mayor parte del tiempo. Además, la decisión final de umbral siempre depende de un suelo operativo (tiempo mínimo de reacción de mantenimiento) que no es derivable de los datos ni automatizable: requiere criterio humano. Automatizar el recálculo sin automatizar también esa validación sería peligroso —bajaría umbrales por debajo del suelo operativo sin que nadie lo revisara.
+
+**Criterio de disparo:** revisar una familia cuando acumule **2 o más eventos reales nuevos** desde la última revisión de esa familia (no 2 eventos en total desde el inicio del sistema — 2 nuevos desde el último ajuste). Con menos de 2 eventos evaluables, cualquier umbral calculado es estadísticamente frágil (ver advertencia sobre Event Recall con muestra pequeña en `ML_DESIGN.md`).
+
+**Herramienta:** `threshold_review.py` implementa el barrido reutilizable, parametrizado por familia, y un modo `--check-trigger` que comprueba si una familia ya acumuló eventos suficientes desde una fecha dada. Se ejecuta a mano; no está enganchado a ningún EventBridge ni Lambda.

@@ -1933,18 +1933,22 @@ function setSparkWindow(days, btn) {
 
 function renderSparklines() {
   const grid = document.getElementById('op-timeline-grid');
-  grid.innerHTML = Object.entries(OP_FAM_META).map(([key, meta]) => `
+  grid.innerHTML = Object.entries(OP_FAM_META).map(([key, meta]) => {
+    const famData = opSparkData[key] || [];
+    const currentThreshold = famData.length ? famData[famData.length - 1].threshold : meta.alert_h;
+    return `
     <div class="op-timeline-card">
       <div class="op-timeline-title">
         <span style="width:10px;height:10px;border-radius:50%;background:${meta.color};display:inline-block;flex-shrink:0"></span>
         ${meta.label}
-        <span style="margin-left:auto;font-size:.65rem;color:var(--text3);font-family:'JetBrains Mono',monospace">umbral: ${meta.alert_h}h</span>
+        <span style="margin-left:auto;font-size:.65rem;color:var(--text3);font-family:'JetBrains Mono',monospace">umbral: ${currentThreshold}h</span>
       </div>
       <div style="position:relative;height:100px">
         <canvas id="spark-${key}"></canvas>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   setTimeout(() => {
     Object.entries(OP_FAM_META).forEach(([key, meta]) => {
