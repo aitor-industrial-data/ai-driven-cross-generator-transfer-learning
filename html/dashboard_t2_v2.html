@@ -964,7 +964,7 @@ footer {
         <tbody>
           <tr>
             <td><span style="color:var(--yaw);font-weight:600">Yaw / Cable</span></td>
-            <td>187</td><td>83h</td><td>48h</td>
+            <td>187</td><td>83h</td><td>36h</td>
             <td><code style="font-family:'JetBrains Mono',monospace;font-size:.78rem">cable_windings__baseline_ratio</code></td>
             <td style="color:var(--text2);font-size:.78rem">—</td>
           </tr>
@@ -1262,7 +1262,7 @@ const PLACEHOLDER = {
 };
 
 const FAM_META = {
-  yaw_cable:   { label:'Yaw / Cable',       color:'#378ADD', lead:75,  alert_h:48  },
+  yaw_cable:   { label:'Yaw / Cable',       color:'#378ADD', lead:75,  alert_h:36  },
   generator:   { label:'Generador',          color:'#D85A30', lead:130, alert_h:72  },
   brake_hydro: { label:'Freno / Hidráulico', color:'#BA7517', lead:130, alert_h:72  },
   pitch_bat:   { label:'Pitch / Baterías',   color:'#1D9E75', lead:293, alert_h:168 },
@@ -1768,7 +1768,7 @@ function activateSection(id, mod) {
 const OP_S3_URL = 'https://ai-driven-cross-generator-transfer-learning.s3.eu-south-2.amazonaws.com/models/t2_predictions_log.csv';
 
 const OP_FAM_META = {
-  yaw_cable:   { label:'Yaw / Cable',       color:'#378ADD', alert_h:48,  actions:{ critical:'Inspección inmediata del sistema de guiñada y cables. Planificar parada controlada urgentemente.', warning:'Programar revisión de cables de guiñada.', ok:'Monitorizar. Sin acción inmediata.' } },
+  yaw_cable:   { label:'Yaw / Cable',       color:'#378ADD', alert_h:36,  actions:{ critical:'Inspección inmediata del sistema de guiñada y cables. Planificar parada controlada urgentemente.', warning:'Programar revisión de cables de guiñada.', ok:'Monitorizar. Sin acción inmediata.' } },
   generator:   { label:'Generador',          color:'#D85A30', alert_h:72,  actions:{ critical:'Revisión urgente de rodamientos y temperatura. Contactar equipo de mantenimiento.', warning:'Programar inspección del generador.', ok:'Sin acción requerida.' } },
   brake_hydro: { label:'Freno / Hidráulico', color:'#BA7517', alert_h:72,  actions:{ critical:'Verificar presión hidráulica y estado del freno. No diferir mantenimiento.', warning:'Revisar niveles de aceite y presión.', ok:'Sin acción requerida.' } },
   pitch_bat:   { label:'Pitch / Baterías',   color:'#1D9E75', alert_h:168, actions:{ critical:'Comprobar estado de baterías y sistema de pitch. Riesgo de descontrol de pala.', warning:'Programar test de baterías de pitch.', ok:'Sin acción requerida.' } },
@@ -1823,11 +1823,11 @@ async function loadOperarioData() {
     console.warn('S3 fetch failed, using embedded CSV data:', e.message);
     // Fallback: datos embebidos del CSV subido
     const csvFallback = `date,last_data_ts,turbine,family,pred_h,alert,alert_threshold_h
-2026-06-08,2026-06-08 00:00:00,2,yaw_cable,32.8,True,48
+2026-06-08,2026-06-08 00:00:00,2,yaw_cable,32.8,True,36
 2026-06-08,2026-06-08 00:00:00,2,generator,58.4,True,72
 2026-06-08,2026-06-08 00:00:00,2,brake_hydro,46.0,True,72
 2026-06-08,2026-06-08 00:00:00,2,pitch_bat,103.4,True,168
-2026-06-07,2026-06-07 00:00:00,2,yaw_cable,32.8,True,48
+2026-06-07,2026-06-07 00:00:00,2,yaw_cable,32.8,True,36
 2026-06-07,2026-06-07 00:00:00,2,generator,58.4,True,72
 2026-06-07,2026-06-07 00:00:00,2,brake_hydro,46.0,True,72
 2026-06-07,2026-06-07 00:00:00,2,pitch_bat,103.4,True,168`;

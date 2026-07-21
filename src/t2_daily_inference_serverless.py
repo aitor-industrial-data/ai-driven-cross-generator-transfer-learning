@@ -29,7 +29,7 @@ BUCKET_NAME = os.environ.get('AWS_S3_BUCKET', 'ai-driven-cross-generator-transfe
 TURBINE_ID  = 2
 
 FAMILIES = {
-    'yaw_cable':   {'alert_h': 48,  'lead_hours': 83},
+    'yaw_cable':   {'alert_h': 36,  'lead_hours': 83},
     'generator':   {'alert_h': 72,  'lead_hours': 127},
     'brake_hydro': {'alert_h': 72,  'lead_hours': 130},
     'pitch_bat':   {'alert_h': 168, 'lead_hours': 295},

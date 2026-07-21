@@ -116,3 +116,24 @@ El parámetro más crítico por familia fue `num_leaves`: controla la complejida
 **Decisión:** Event Recall como métrica primaria de selección de modelo.
 
 **Justificación:** AUC-ROC mide la capacidad discriminante fila a fila, ignorando la estructura temporal de los eventos. Un modelo puede tener AUC-ROC de 0.90 y fallar en detectar el 40% de los fallos reales si sus aciertos están concentrados en filas individuales alejadas del evento. F1 tiene el mismo problema: pondera iguales las filas positivas independientemente de si su acierto contribuye a detectar un fallo real o no. Event Recall mide exactamente lo que importa operativamente: de los fallos reales que ocurrieron, cuántos recibieron al menos una alerta antes de tiempo. Un fallo no anticipado tiene un coste concreto —parada no planificada, grúa, reparación de emergencia—. Un fallo anticipado tiene coste cero en comparación. La métrica tiene que reflejar esa asimetría.
+
+---
+
+## 11. Umbral de alerta operativo vs. lead time de etiquetado
+
+**El lead time (sección 4) y el umbral de alerta son parámetros independientes que no deben confundirse.** El lead time es un criterio de calidad de etiquetado para el entrenamiento: define cuántas horas antes de un fallo se marca una fila como `is_pre_fault=True`, elegido para mantener el % de positivos en train en un rango que fuerce al modelo a discriminar (evitando el extremo de <2% sin señal suficiente y el de >30% donde predecir siempre "pre-fallo" ya da buena métrica). No tiene relación con cuánto tiempo de reacción necesita mantenimiento.
+
+El umbral de alerta (`alert_h`, aplicado sobre `cal_pred` en el Paso 6 de la Lambda de inferencia) es una decisión operativa posterior a la inferencia: no afecta al entrenamiento del modelo ni se recalcula en el reentreno mensual. Los valores originales (48h/72h/72h/168h) se fijaron como una fracción aproximada (~57%) del lead time de cada familia, sin una justificación operativa documentada —no hay registro de un tiempo mínimo de reacción de mantenimiento real detrás de esos números.
+
+**Suelos operativos mínimos estimados** (estimación experta de mantenimiento O&M eólico onshore, pendiente de validación con el equipo de mantenimiento real; no son un dato medido):
+
+| Familia | Umbral original | Suelo mínimo estimado | Justificación |
+|---|:---:|:---:|---|
+| `yaw_cable` | 48h | 24–36h | Intervención mecánica/eléctrica rutinaria, repuestos habituales en stock local |
+| `generator` | 72h | 72–96h | Riesgo de escalado a fallo catastrófico; diagnóstico y repuesto especializado pueden requerir pedido |
+| `brake_hydro` | 72h | 24–48h | Mantenimiento mecánico estándar, piezas de stock habitual |
+| `pitch_bat` | 168h | 120–168h | Sistema de seguridad crítico; packs de batería normalmente no están en stock local, dependen de pedido al fabricante |
+
+**Decisión aplicada:** se baja el umbral de `yaw_cable` de 48h a 36h, único caso donde coinciden dos fuentes independientes de evidencia: el suelo operativo estimado (24–36h) y el análisis de datos sobre predicciones reales de producción (barrido de umbral sobre `t2_predictions_log.csv` vs. `turbine_2_fault_log.csv`, que mantiene Event Recall=100% hasta 34h). Las otras tres familias se mantienen sin cambios: no hay eventos reales suficientes en la ventana de predicciones de producción para validar un ajuste con datos, y no se quiere bajar un umbral solo por estimación experta sin ese respaldo.
+
+**Pendiente:** repetir este barrido cada mes tras el reentreno, por familia y por versión de modelo (T2-only y T1+T2 tienen perfiles de error distintos —MAE calibrado 35.3h vs 21.2h en `yaw_cable`— por lo que el umbral óptimo puede no ser el mismo para ambas). El umbral resultante nunca debe bajar del suelo operativo mínimo de la tabla anterior, aunque los datos sugieran que se podría; solo se ajusta hacia arriba si la evidencia de datos lo justifica, o hacia abajo hasta ese suelo si el Event Recall se mantiene en 100%.
