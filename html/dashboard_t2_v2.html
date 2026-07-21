@@ -2206,7 +2206,6 @@ function renderRetrainMonth(month) {
   const winners_t1t2 = rows.filter(r => r.winner === 'T1+T2').length;
   const winners_t2   = rows.filter(r => r.winner === 'T2').length;
   const avg_er_winner = rows.reduce((s, r) => s + parseFloat(r.er_winner || 0), 0) / rows.length;
-  const total_events  = rows.reduce((s, r) => s + parseInt(r.events_detected_winner || 0), 0);
 
   document.getElementById('retrain-detail-header').innerHTML = `
     <div class="retrain-kpi">
@@ -2225,9 +2224,9 @@ function renderRetrainMonth(month) {
       <div class="retrain-kpi-sub">familias con T1+T2</div>
     </div>
     <div class="retrain-kpi">
-      <div class="retrain-kpi-label">Fallos detectados</div>
-      <div class="retrain-kpi-val" style="color:var(--green)">${total_events}</div>
-      <div class="retrain-kpi-sub">modelos desplegados</div>
+      <div class="retrain-kpi-label">Ganador T2-only</div>
+      <div class="retrain-kpi-val" style="color:var(--green)">${winners_t2}<span style="font-size:.9rem"> / ${rows.length}</span></div>
+      <div class="retrain-kpi-sub">familias con T2-only</div>
     </div>
   `;
 
