@@ -7,7 +7,27 @@
 
 <br>
 
-[![AWS](https://img.shields.io/badge/AWS-Lambda%20%7C%20S3%20%7C%20ECR%20%7C%20ECS%20Fargate-FF9900?style=flat-square&logo=amazonaws&logoColor=white)](https://aws.amazon.com) [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org) [![LightGBM](https://img.shields.io/badge/LightGBM-Transfer%20Learning-2ecc71?style=flat-square)](https://lightgbm.readthedocs.io) [![PySpark](https://img.shields.io/badge/PySpark-ETL%20Pipeline-E25A1C?style=flat-square&logo=apachespark&logoColor=white)](https://spark.apache.org) [![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions%20%E2%86%92%20ECR%20%E2%86%92%20Lambda-2088FF?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/features/actions)
+<table><tr><td align="center">
+
+[![AWS](https://img.shields.io/badge/AWS-Lambda%20%7C%20S3%20%7C%20ECR%20%7C%20Fargate-FF9900?style=flat-square&logo=amazonaws&logoColor=white)](https://aws.amazon.com)
+
+</td><td align="center">
+
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+
+</td><td align="center">
+
+[![LightGBM](https://img.shields.io/badge/LightGBM-Transfer%20Learning-2ecc71?style=flat-square)](https://lightgbm.readthedocs.io)
+
+</td><td align="center">
+
+[![PySpark](https://img.shields.io/badge/PySpark-ETL-E25A1C?style=flat-square&logo=apachespark&logoColor=white)](https://spark.apache.org)
+
+</td><td align="center">
+
+[![CI/CD](https://img.shields.io/badge/CI%2FCD-Actions%20%E2%86%92%20ECR%20%E2%86%92%20Lambda-2088FF?style=flat-square&logo=githubactions&logoColor=white)](https://github.com/features/actions)
+
+</td></tr></table>
 
 <br>
 
