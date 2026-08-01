@@ -89,26 +89,9 @@ jobs:
           echo "revision=${REVISION}" >> $GITHUB_OUTPUT
           echo "✅ Task Definition registrada: ${{ env.TASK_FAMILY }}:${REVISION}"
 
-      - name: Actualizar EventBridge target con nueva revisión
-        run: |
-          aws events put-targets \
-            --rule t2-monthly-retrain-schedule \
-            --targets '[{
-              "Id": "1",
-              "Arn": "arn:aws:ecs:eu-south-2:610140802215:cluster/sunsaver-cluster",
-              "RoleArn": "arn:aws:iam::610140802215:role/t2-retrain-eventbridge-role",
-              "EcsParameters": {
-                "TaskDefinitionArn": "arn:aws:ecs:eu-south-2:610140802215:task-definition/t2-retrain:${{ steps.taskdef.outputs.revision }}",
-                "TaskCount": 1,
-                "LaunchType": "FARGATE",
-                "NetworkConfiguration": {
-                  "awsvpcConfiguration": {
-                    "Subnets": ["subnet-0aaf5f3d23ffcfd2f"],
-                    "SecurityGroups": ["sg-07abe30f83ee437cb"],
-                    "AssignPublicIp": "ENABLED"
-                  }
-                }
-              }
-            }]' \
-            --region ${{ env.AWS_REGION }}
-          echo "✅ EventBridge actualizado a revisión ${{ steps.taskdef.outputs.revision }}"
+      # NOTA: se elimina el step "Actualizar EventBridge target con nueva revisión".
+      # El schedule t2-monthly-retrain (EventBridge Scheduler) apunta a la task
+      # definition SIN número de revisión (arn:.../task-definition/t2-retrain),
+      # por lo que ECS resuelve automáticamente la última revisión ACTIVE en
+      # cada ejecución. Ya no hace falta empujar el ARN a ningún target tras
+      # cada deploy.
